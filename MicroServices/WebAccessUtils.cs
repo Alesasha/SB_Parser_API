@@ -163,9 +163,14 @@ namespace SB_Parser_API.MicroServices
             Console.Title = curCT;
             return str;
         }
+
+
+
         public static void GetWebInfoSys(WebRequestOrder wrOrder)
         {
             Proxy_to_Domain ptdCurrent = new();
+            Proxy_to_Domain? ptd_inDB_Current = null;
+            var reqTime = DateTime.Now;
             var requestGenerator = () => {
                 var req = new HttpRequestMessage()
                 {
@@ -176,54 +181,235 @@ namespace SB_Parser_API.MicroServices
                     req.Headers.Add(h.key, h.value);
                 return req;
             };
-            var updateDomain = (Proxy_to_Domain ptd, Proxy_to_Domain ptd_in_DB) =>
+            /*
+            var updateDomain = (Proxy_to_Domain ptd_or, Proxy_to_Domain ptd_in_DB) =>
             {
-                ptd.tested = 1;
-                ptd.lastCheck = DateTime.Now;
+                var ptd = ptd_or with { tested = 1, lastCheck = DateTime.Now, inUseTill = null };
+                ptd.client = ptd_or.client;
                 ptd.rate = ptd.testOK * 1000;
-                ptd.userAgent = "";
+                //ptd.userAgent = "";
+                ptd.setParametr("userAgent", "");
 
                 if (ptd_in_DB is not null)
                 {
                     if (ptd_in_DB.rate == 0 && ptd_in_DB.testOK == 0 && ptd.testOK > 0 && ptd_in_DB.tested < 9)
                         ptd.rate = (9 + ptd.testOK - ptd_in_DB.tested) * 100;
                     else
-                        ptd.rate = (ptd_in_DB.rate * 9 + ptd.rate) / 10;
+                        ptd.rate = (int)Math.Ceiling((double)(ptd_in_DB.rate * 9 + ptd.rate) / 10);
 
                     ptd.tested += ptd_in_DB.tested;
                     ptd.testOK += ptd_in_DB.testOK;
-                    ptd.userAgent = ptd_in_DB.userAgent ?? "";
+                    ptd.setParametr("userAgent", ptd_in_DB.getParametr("userAgent") ?? "");
+                    //ptd.userAgent = ptd_in_DB.userAgent ?? "";
                     ptd.domain = ptd_in_DB.domain;
                 }
                 else
                     if (ptd.testOK == 0)
-                        return;
+                    return;
 
-                if ((ptd.userAgent is null || ptd.userAgent.Length == 0) && ptd.testOK > 0)
-                    ptd.userAgent = RandomUA();
+                var uA = ptd.getParametr("userAgent");
+                if ((uA is null || uA.Length == 0) && ptd.testOK > 0)
+                    ptd.setParametr("userAgent", RandomUA());
+                //if ((ptd.userAgent is null || ptd.userAgent.Length == 0) && ptd.testOK > 0)
+                //  ptd.userAgent = RandomUA();
+
                 if (ptd.testOK > ptd.tested) { Console.Beep(); Console.Beep(); Console.Beep(); Console.Beep(); Console.WriteLine($"\r\n\r\ntested={ptd.tested} testOK={ptd.testOK} !!!!"); }
-                lock (ProxyToDomainList)
+
+                if (!ProxyToDomainLists.TryGetValue(ptd.domain, out _))
+                    ProxyToDomainLists[ptd.domain].PD_List = ProxyToDomainGet(new Proxy_to_Domain() { domain = ptd.domain }).OrderBy(x => x.rate).ThenBy(x => x.testOK).ToList();
+
+                lock (ProxyToDomainLists[ptd.domain])
                 {
-                    ProxyToDomainList.RemoveAll(x => x.ip == ptd.ip && x.port == ptd.port &&
+                    ProxyToDomainLists[ptd.domain].RemoveAll(x => x.ip == ptd.ip && x.port == ptd.port &&
                     x.protocol == ptd.protocol && x.domain == ptd.domain);
-                    ProxyToDomainList.Add(ptd);
+                    ProxyToDomainLists[ptd.domain].Add(ptd);
+                    ProxyToDomainAddOrUpdate(ptd);
                 }
-                ProxyToDomainAddOrUpdate(ptd);
+            };
+            */
+            var ptdoGet = (string theDomain) =>
+            {
+                ProxyToDomainContext? the_ptdl;
+                if (!ProxyToDomainLists.TryGetValue(theDomain, out the_ptdl))
+                    lock (ProxyToDomainLists)
+                        the_ptdl = ProxyToDomainLists[theDomain] = new()
+                        {
+                            PD_List = ProxyToDomainGet(new Proxy_to_Domain()
+                            { domain = theDomain }).Distinct(new ProxyToDomainIpPortProtocolComparer()).
+                            OrderBy(x => x.rate).ThenBy(x => x.testOK).ToList()
+                        };
+                return the_ptdl;
             };
 
-            var updateProxyInfo = (string em,Proxy_to_Domain pc) =>
+            var updateDomain = (Proxy_to_Domain ptd_or, Proxy_to_Domain? ptd_in_DB) =>
             {
-                Console.Title = em;
+                var ptd = ptd_or with { tested = 1, lastCheck = DateTime.Now, inUseTill = null };
+                ptd.client = ptd_or.client;
+                ptd.rate = ptd.testOK * 1000;
+                ptd.setParametr("userAgent", "");
+                var ptdo = ptdoGet(ptd.domain);
+                if (ptd_in_DB is null || ptdo.PD_List.IndexOf(ptd_in_DB) < 0)
+                {
+                    lock (ProxyToDomainLists[ptd.domain])
+                    {
+                        ptd_in_DB = ptdo?.PD_List?.FirstOrDefault(x => x.ip == ptd.ip && x.port == ptd.port && x.protocol == ptd.protocol);
+                        if(ptd_in_DB is not null)
+                            ptd_in_DB.inUseTill = DateTime.Now.AddMilliseconds(wrOrder.timeOut * 6);
+                    }
+                }
+
+                if (ptd_in_DB is not null)
+                {
+                    if (ptd_in_DB.rate == 0 && ptd_in_DB.testOK == 0 && ptd.testOK > 0 && ptd_in_DB.tested < 9)
+                        ptd.rate = (9 + ptd.testOK - ptd_in_DB.tested) * 100;
+                    else
+                        ptd.rate = (int)Math.Ceiling((double)(ptd_in_DB.rate * 9 + ptd.rate) / 10);
+
+                    ptd.tested += ptd_in_DB.tested;
+                    ptd.testOK += ptd_in_DB.testOK;
+                    ptd.setParametr("userAgent", ptd_in_DB.getParametr("userAgent") ?? "");
+                    //ptd.userAgent = ptd_in_DB.userAgent ?? "";
+                    ptd.domain = ptd_in_DB.domain;
+                }
+                else
+                    if (ptd.testOK <= 0)
+                        return;
+
+                var uA = ptd.getParametr("userAgent");
+                if ((uA is null || uA.Length == 0) && ptd.testOK > 0)
+                    ptd.setParametr("userAgent", RandomUA());
+
+                if (ptd.testOK > ptd.tested) { Console.Beep(); Console.Beep(); Console.Beep(); Console.Beep(); Console.WriteLine($"\r\n\r\ntested={ptd.tested} testOK={ptd.testOK} !!!!"); }
+
+                /*
+                if (!ProxyToDomainLists.TryGetValue(ptd.domain, out _))
+                    lock(ProxyToDomainLists)
+                        ProxyToDomainLists[ptd.domain] = new() { PD_List = ProxyToDomainGet(new Proxy_to_Domain() 
+                        { domain = ptd.domain }).OrderBy(x => x.rate).ThenBy(x => x.testOK).ToList() };
+                */
+                //foreach(var x in ProxyToDomainLists) Console.WriteLine(x.Key);
+                lock (ProxyToDomainLists[ptd.domain])
+                {
+                    int i, j;
+                    if (ptd_in_DB is null)
+                    {
+                        i = ProxyToDomainLists[ptd.domain].PD_List.Count;
+                        ProxyToDomainLists[ptd.domain].PD_List.Add(ptd);
+                        ProxyToDomainLists[ptd.domain].PD_ListToUpdate.Add(ptd);
+                    }
+                    else
+                    {
+                        i = ProxyToDomainLists[ptd.domain].PD_List.IndexOf(ptd_in_DB);
+                        if (i < 0)
+                        {
+                            var ptdi = ProxyToDomainLists[ptd.domain].PD_List.Find(x => x.ip == ptd_in_DB.ip &&
+                            x.port == ptd_in_DB.port && x.protocol == ptd_in_DB.protocol && x.domain == ptd_in_DB.domain);
+
+                            if (ptdi is not null)
+                                i = ProxyToDomainLists[ptd.domain].PD_List.IndexOf(ptdi);
+                            else
+                            {
+                                i = ProxyToDomainLists[ptd.domain].PD_List.Count;
+                                ProxyToDomainLists[ptd.domain].PD_List.Add(ptd_in_DB);
+                            }
+                        }
+                        j = ProxyToDomainLists[ptd.domain].PD_ListToUpdate.IndexOf(ptd_in_DB);
+
+                        try
+                        {
+                            ProxyToDomainLists[ptd.domain].PD_List[i] = ptd;
+                        }
+                        catch (Exception e)
+                        {
+                            var sbo = ProxyToDomainLists[ptd.domain].PD_List;
+                            Console.Beep();
+                            Console.WriteLine($"Count={sbo.Count},i={i}");
+                            Console.WriteLine($"Count={sbo.Count}");
+                        }
+
+                        if (j >= 0)
+                            ProxyToDomainLists[ptd.domain].PD_ListToUpdate[j] = ptd;
+                        else
+                            ProxyToDomainLists[ptd.domain].PD_ListToUpdate.Add(ptd);
+
+                        var ptdl = ProxyToDomainLists[ptd.domain].PD_List;
+                        int imax = ptdl.Count - 1;
+                        while (i < imax && ptdl[i].rate > ptdl[i + 1].rate)
+                        {
+                            (ptdl[i + 1], ptdl[i]) = (ptdl[i], ptdl[i + 1]);
+                            i++;
+                        }
+                        while (i > 0 && ptdl[i].rate < ptdl[i - 1].rate)
+                        {
+                            (ptdl[i - 1], ptdl[i]) = (ptdl[i], ptdl[i - 1]);
+                            i--;
+                        }
+                        if (ProxyToDomainLists[ptd.domain].proxiesInUse > 0)
+                            ProxyToDomainLists[ptd.domain].proxiesInUse--;
+                    }
+                }
+                
+                /*
+                    ProxyToDomainLists[ptd.domain].PD_List.Add(ptd_in_DB);
+
+                    ProxyToDomainLists[ptd.domain].PD_List.RemoveAll(x => x.ip == ptd.ip && x.port == ptd.port &&
+                    x.protocol == ptd.protocol && x.domain == ptd.domain);
+                    ProxyToDomainLists[ptd.domain].PD_List.Add(ptd);
+                    ProxyToDomainAddOrUpdate(ptd);
+                */
+            };
+
+            var updateProxyInfo = (string em, Proxy_to_Domain pc, Proxy_to_Domain? pcInDB) =>
+            {
+                Console.Title = em + $"url={wrOrder.url}";
                 wrOrder.errorMsg = em;
 
                 if (pc.ip.Length == 0)
                     return;
+
+                if (pc.requestCounterInArow > 0)
+                    pc.requestCounterInArow--;
+
+                pc.domain = GetDomain(wrOrder.url);
+                pc.testOK = em.Length == 0 ? 1 : (pc.requestCounterInArow = 0);
+                updateDomain(pc, pcInDB);  // ??? pc, pc
+
+                Console.Title = curCT;
+            };
+            /*
+            var updateProxyInfo = (string em, Proxy_to_Domain pc) =>
+            {
+                Console.Title = em + $"url={wrOrder.url}";
+                wrOrder.errorMsg = em;
+
+                if (pc.ip.Length == 0)
+                    return;
+                var domainsToUpdate = new List<Proxy_to_Domain>();
                 if (em.Contains(PINGfailed))
                     pc.domain = "";
                 else
                     pc.domain = GetDomain(wrOrder.url);
-                var domainsToUpdate = ProxyToDomainGet(pc);
 
+                foreach (var dkey in ProxyToDomainLists.Keys)
+                    domainsToUpdate.AddRange(ProxyToDomainLists[dkey].Where(x => (x is not null) && x.ip == pc.ip && x.port == pc.port && x.protocol == pc.protocol &&
+                    (pc.domain.Length == 0 ? true : x.domain == pc.domain)).ToList());
+
+                //var domainsToUpdate = ProxyToDomainGet(pc);
+
+                if (pc.requestCounterInArow > 0)
+                    pc.requestCounterInArow--;
+
+                if (em.Length == 0)
+                {
+                    pc.testOK = 1;
+                    //pc.errorCounterInArow = 0;
+                }
+                else
+                {
+                    pc.testOK = 0;
+                    //pc.errorCounterInArow = 0;
+                    pc.requestCounterInArow = 0;
+                }
                 if (domainsToUpdate.Count <= 0)
                 {
                     pc.testOK = em.Length == 0 ? 1 : 0;
@@ -235,9 +421,9 @@ namespace SB_Parser_API.MicroServices
                         pc.testOK = em.Length == 0 ? 1 : 0;
                         updateDomain(pc, domain);
                     }
-
                 Console.Title = curCT;
             };
+            */
 
             if (wrOrder.pingOnly)
             {
@@ -245,11 +431,11 @@ namespace SB_Parser_API.MicroServices
                     wrOrder.pingOk = true;
                 else
                     wrOrder.pingOk = false;
-                Console.Title = $"END_1({Thread.CurrentThread.ManagedThreadId})";
+                Console.Title = $"END_1({Environment.CurrentManagedThreadId},url={wrOrder.url},rTime={(DateTime.Now - reqTime).ToString(@"m\:ss\.f")})";
+                //Console.WriteLine($"END_1({Environment.CurrentManagedThreadId},url={wrOrder.url},rTime={(DateTime.Now-reqTime):ss.fff})");
                 return;
             }
 
-            var handler = new HttpClientHandler();
             if (wrOrder.proxy.ip.Length > 0)
             {
                 if (IsUrlDomainAlive(wrOrder.proxy.ip, wrOrder.timeOut / 6))
@@ -259,79 +445,110 @@ namespace SB_Parser_API.MicroServices
                 }
                 else
                 {
-                    updateProxyInfo($"{PINGfailed} {wrOrder.proxy.protocol}://{wrOrder.proxy.ip}:{wrOrder.proxy.port}", wrOrder.proxy);
+                    updateProxyInfo($"{PINGfailed} {wrOrder.proxy.protocol}://{wrOrder.proxy.ip}:{wrOrder.proxy.port}", wrOrder.proxy,null);
                     wrOrder.givenProxyPingOk = false;
                 }
             }
             if (wrOrder.needProxy && ptdCurrent.ip.Length == 0)
             {
                 var dom = GetDomain(wrOrder.url);
-                Proxy_to_Domain pC;
-                while (true)
+                Proxy_to_Domain? pC = null;
+                //var ProxyToDomainList = ProxyToDomainLists[dom];
+
+                var ptdC = ptdoGet(dom);
+
+                lock (ProxyToDomainLists[dom])
                 {
-                    var ptdList = ProxyToDomainList.Where(x => x.domain == dom).ToList();
-                    int n = 1000;
-                    while ((ptdList.Where(x => x.tested == x.testOK || x.rate >= n).Count() < MinimalProxyPool) && n >= 50)
-                        n -= 50;
-                    ptdList = ptdList.Where(x => x.tested == x.testOK || x.rate >= n).ToList();
-
-                    if (ptdList.Count < MinimalProxyPool)
+                    ptdC.proxiesInUse++;
+                    var proxiesPull = ptdC.proxiesInUse * ProxyPerQuiryThread;
+                    proxiesPull = proxiesPull > ptdC.PD_List.Count ? ptdC.PD_List.Count : proxiesPull;
+                    var curMin = ptdC.PD_List.Count - proxiesPull;
+                    var curMax = ptdC.PD_List.Count - 1;
+                    ptdC.cursor = ptdC.cursor > curMax ? curMax : ptdC.cursor;
+                    ptdC.cursor = ptdC.cursor < curMin ? curMin : ptdC.cursor;
+                    var curT = ptdC.cursor;
+                    for (var i = 0; i < proxiesPull; i++)
                     {
-                        var proxyListAdd = GetProxyDB_List();
-                        n = 1000;
-                        var ptdUnion = () =>
+                        var pCC = ptdC.PD_List[curT];
+                        if (pCC.requestCounterInArow > 0 && (pCC.inUseTill is null || pCC.inUseTill < DateTime.Now))
                         {
-                            return proxyListAdd.Where(x => x.rate >= n).Select(x => new Proxy_to_Domain
-                            {
-                                ip = x.ip!,
-                                port = x.port!,
-                                protocol = x.protocol!.Replace("HTTPS", "HTTP",
-                            (StringComparison)CompareOptions.IgnoreCase),
-                                domain = dom
-                            }).Union(ptdList).
-                            Distinct(new ProxyToDomainIpPortProtocolComparer()).ToList();
-                        };
-                        while (ptdUnion().Count() < MinimalProxyPool && n >= 50)
-                            n -= 50;
-                        ptdList = ptdUnion();
+                            pC = pCC;
+                            break;
+                        }
+                        curT--;
+                        if (curT < curMin)
+                            curT = curMax;
                     }
-                    //Console.WriteLine($"ptdList.Count={ptdList.Count}");
-                    var mindt = ptdList.Min(x => x.lastCheck);
-                    pC = ptdList.FirstOrDefault(x => x.lastCheck == mindt)!;
-                    //Console.WriteLine($"{pC.protocol}://{pC.ip}:{pC.port} ({pC.domain})  {pC.tested}/{pC.testOK} rate:{pC.rate}");
-                    if ((pC is null) || IsUrlDomainAlive(pC.ip, wrOrder.timeOut / 6))
-                        break;
-                    updateProxyInfo($"{PINGfailed} {pC.protocol}://{pC.ip}:{pC.port}", pC);
-                }
+                    if (pC is null)
+                    {
+                        for (var i = 0; i < proxiesPull; i++)
+                        {
+                            var pCC = ptdC.PD_List[ptdC.cursor];
+                            if (pCC.inUseTill is null || pCC.inUseTill < DateTime.Now)
+                            {
+                                if (IsUrlDomainAlive(pCC.ip, wrOrder.timeOut / 6))
+                                {
+                                    pC = pCC;
+                                    break;
+                                }
+                                else
+                                    updateProxyInfo($"{PINGfailed} {pCC.protocol}://{pCC.ip}:{pCC.port}", pCC with { }, null);
 
-                if (pC is not null)
-                    ptdCurrent = pC;
+                            }
+                            ptdC.cursor--;
+                            if (ptdC.cursor < curMin)
+                                ptdC.cursor = curMax;
+                        }
+                    }
+                    if (pC is not null)
+                    {
+                        pC.inUseTill = DateTime.Now.AddMilliseconds(wrOrder.timeOut * 16);
+                        if (pC.requestCounterInArow <= 0) pC.requestCounterInArow = MaxProxyRequestInArow;
+                        pC.lastCheck = DateTime.Now;
+                        //ProxyToDomainAddOrUpdate(pC);
+                        ptdCurrent = pC with { };
+                        ptdCurrent.client = pC.client;
+                        ptd_inDB_Current = pC;
+                        if (ptdC.PD_ListToUpdate.IndexOf(pC) < 0)
+                            ptdC.PD_ListToUpdate.Add(pC);
+                    }
+                }
             }
+            //Console.WriteLine($"clientCount={WebModels.ProxyToDomainList.Where(x => x.client is not null).ToList().Count()}");
             if (wrOrder.needUserAgent)
             {
                 wrOrder.headers.RemoveAll(x => x.key == "User-Agent");
                 var ua = RandomUA();
                 if (ptdCurrent is not null)
                 {
-                    if ((ptdCurrent.userAgent is null) || (ptdCurrent.userAgent.Length == 0))
-                        ptdCurrent.userAgent = ua;
+                    var cUA = ptdCurrent.getParametr("userAgent");
+                    if ((cUA is null) || (cUA.Length == 0))
+                        ptdCurrent.setParametr("userAgent", ua);
                     else
-                        ua = ptdCurrent.userAgent;
+                        ua = cUA;
                 }
                 wrOrder.headers.Add(new RequestHeader() { key = "User-Agent", value = ua });
             }
-
-            if (ptdCurrent?.ip.Length > 0)
+            HttpClient client;
+            if (ptdCurrent?.client is null)
             {
-                handler.Proxy = new WebProxy(new Uri($"{ptdCurrent.protocol}://{ptdCurrent.ip}:{ptdCurrent.port}"));
-                handler.UseProxy = true;
+                var handler = new HttpClientHandler();
+                if (ptdCurrent?.ip.Length > 0)
+                {
+                    handler.Proxy = new WebProxy(new Uri($"{ptdCurrent.protocol}://{ptdCurrent.ip}:{ptdCurrent.port}"));
+                    handler.UseProxy = true;
+                    wrOrder.proxy = ptdCurrent;
+                }
+                else
+                {
+                    handler.Proxy = null;
+                    handler.UseProxy = false;
+                }
+                wrOrder.proxy.client = ptdCurrent!.client = client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(wrOrder.timeOut) };
+                //var jsonString = JsonConvert.SerializeObject(client);
             }
             else
-            {
-                handler.Proxy = null;
-                handler.UseProxy = false;
-            }
-            var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(wrOrder.timeOut) };
+                client = ptdCurrent.client;
 
             var wdt = DateTime.Now.AddMilliseconds(wrOrder.timeOut * 1.5);
 
@@ -350,9 +567,10 @@ namespace SB_Parser_API.MicroServices
 
                 if (wrOrder.errorMsg.Length > 0)
                 {
-                    updateProxyInfo(wrOrder.errorMsg, ptdCurrent!);
+                    updateProxyInfo(wrOrder.errorMsg, ptdCurrent!,ptd_inDB_Current);
                     wrOrder.proxy = ptdCurrent!;
-                    Console.Title = $"END_2({Thread.CurrentThread.ManagedThreadId})";
+                    Console.Title = $"END_2({Thread.CurrentThread.ManagedThreadId},url={wrOrder.url},rTime={(DateTime.Now - reqTime).ToString(@"m\:ss\.f")})";
+                    //Console.WriteLine($"END_2({Thread.CurrentThread.ManagedThreadId},url={wrOrder.url},rTime={(DateTime.Now - reqTime):ss})");
                     return;
                 }
                 att++;
@@ -367,18 +585,19 @@ namespace SB_Parser_API.MicroServices
                     Console.Title = $"PCIrtEx({Thread.CurrentThread.ManagedThreadId}):{em} / {uri}({$"{ptdCurrent?.protocol}://{ptdCurrent?.ip}:{ptdCurrent?.port}"})";
                     Task.Delay(1000).Wait();
                 };
-                    
+
                 try
                 {
                     var taskR = client.SendAsync(request!);
                     taskR.Wait();
                     wrOrder.response = taskR.Result;              //response = (HttpWebResponse)request.GetResponse();
-                    taskR?.Dispose();
                     if (taskR?.Exception is not null)
                     {
                         collectErrorMsg(taskR?.Exception?.Message ?? "");
+                        taskR?.Dispose();
                         continue;
                     }
+                    taskR?.Dispose();
                 }
                 catch (Exception ex)
                 {
@@ -395,16 +614,21 @@ namespace SB_Parser_API.MicroServices
                     if (txt.Contains(key))
                         wrOrder.requestDone = true;
 
-            updateProxyInfo(wrOrder.requestDone ? "":"Unexpected content in response.", ptdCurrent!);
+            updateProxyInfo(wrOrder.requestDone ? "" : "Unexpected content in response.", ptdCurrent!, ptd_inDB_Current);
             wrOrder.proxy = ptdCurrent!;
-            Console.Title = $"END_3({Thread.CurrentThread.ManagedThreadId})";
+            Console.Title = $"END_3({Thread.CurrentThread.ManagedThreadId},url={wrOrder.url},rTime={(DateTime.Now - reqTime).ToString(@"m\:ss\.f")})";
+            //Console.WriteLine($"END_3({Thread.CurrentThread.ManagedThreadId},url={wrOrder.url},rTime={(DateTime.Now - reqTime).ToString(@"m\:ss\.f")})");
             return;
         }
-
+       
+        static public int requestCount = 0;
         public static void RequestQueueController()
         {
-            int requestCount = 0;
-            ProxyToDomainList = ProxyToDomainGet() ?? new List<Proxy_to_Domain>();
+            //int requestCount = 0;
+            //ProxyToDomainList = ProxyToDomainGet() ?? new List<Proxy_to_Domain>();
+            if(ProxyToDomainLists is null)
+                ProxyToDomainLists = new();
+            Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
 
             var takeNextOrder = () => {
                 WebRequestOrder? nextOrder;
@@ -415,16 +639,15 @@ namespace SB_Parser_API.MicroServices
                 {
                     if (WebRequestOrderQueue.Count > 0)
                     {
-                        var shortOrderList = WebRequestOrderQueue.Where(x => x.priority == Priority.High).ToList();
-                        shortOrderList = shortOrderList.Count() > 0 ? shortOrderList : WebRequestOrderQueue.Where(x => x.priority == Priority.Medium).ToList();
-                        shortOrderList = shortOrderList.Count() > 0 ? shortOrderList : WebRequestOrderQueue.Where(x => x.priority == Priority.Low).ToList();
+                        var minPriority = WebRequestOrderQueue.Min(x => x.priority);
+                        var shortOrderList = WebRequestOrderQueue.Where(x => x.priority == minPriority);
 
                         if (shortOrderList.Count() == 0)
                             nextOrder = null;
                         else
                         {
-                            var dt = shortOrderList.Min(x => x.created);
-                            nextOrder = shortOrderList.FirstOrDefault(x => x.created == dt);
+                            var dtMin = shortOrderList.Min(x => x.created);
+                            nextOrder = shortOrderList.FirstOrDefault(x => x.created == dtMin);
                             if (nextOrder is not null)
                                 WebRequestOrderQueue.Remove(nextOrder);
                         }
@@ -438,57 +661,96 @@ namespace SB_Parser_API.MicroServices
                 //Console.WriteLine($"ReqOrder{requestCount}; url={nextOrder?.url}; wroq={wroq},wroq[0]={wroq0}"); //wroq={WebRequestOrderQueue.Count},wroq[0]={WebRequestOrderQueue[0].url}
                 return nextOrder;
             };
-
+            Task? ptdUpdtTask = null;
+            List<Proxy_to_Domain> ptdUpdtList = new();
             while (true)
             {
-                RequestQueueControllerTimeToCheck.WaitOne();
-                List<WebRequestTaskInfo> OrderQueueItemsToDelete = new();
-                //Console.WriteLine($"{WebRequestTaskInfoList.Count}");
-                for (var i = 0; i < WebRequestTaskInfoList.Count; i++)
+                try
                 {
-                    var wrti = WebRequestTaskInfoList[i];
-                    if (wrti.task?.IsCompleted ?? true)
-                        wrti.task = Task.Factory.StartNew(() => RequestExecutor(wrti), TaskCreationOptions.LongRunning);
-                    if (wrti.isResultReady)
+                    RequestQueueControllerTimeToCheck.WaitOne(20000);
+                    if ((ptdUpdtTask is null || ptdUpdtTask.IsCompleted) && ProxyToDomainListsNextRefresh < DateTime.Now)
                     {
-                        wrti.webRequestOrder.completed.Set();
-                        var no = takeNextOrder();
-                        if (no is not null)
+                        lock (ProxyToDomainLists)
                         {
-                            wrti.webRequestOrder = no;
-                            wrti.command = CMD.ExecuteRequest;
+                            Console.WriteLine($"Domains_Total = {ProxyToDomainLists.Keys.Count}");
+                            ptdUpdtList.Clear();
+                            foreach (var dkey in ProxyToDomainLists.Keys)
+                            {
+                                Console.WriteLine($"{dkey}-{ProxyToDomainLists[dkey].PD_ListToUpdate.Count}");
+
+                                lock (ProxyToDomainLists[dkey])
+                                {
+                                    foreach (var ptdUpdt in ProxyToDomainLists[dkey].PD_ListToUpdate)
+                                        ptdUpdtList.Add(ptdUpdt with { });
+
+                                    ProxyToDomainLists[dkey].PD_ListToUpdate.Clear();
+                                }
+
+                                //continue;
+                                //ProxyToDomainAddOrUpdateList(ProxyToDomainLists[dkey]);
+                                //ProxyToDomainLists[dkey] = ProxyToDomainGet(new Proxy_to_Domain() { domain = dkey.Length>0 ? dkey : "____"}); //Check
+                            }
+                        }
+                        ptdUpdtTask = Task.Factory.StartNew(() => ProxyToDomainAddOrUpdateList(ptdUpdtList), TaskCreationOptions.LongRunning);
+                        ProxyToDomainListsNextRefresh = DateTime.Now.AddSeconds(ProxyToDomainListsRefreshInterval);
+                    }
+                    List<WebRequestTaskInfo> OrderQueueItemsToDelete = new();
+                    //Console.WriteLine($"WRTIL_Count={WebRequestTaskInfoList.Count}");
+                    for (var i = 0; i < WebRequestTaskInfoList.Count; i++)
+                    {
+                        var wrti = WebRequestTaskInfoList[i];
+                        if ((wrti.task is null) || wrti.task.IsCompleted || wrti.task.IsFaulted || wrti.task.IsCanceled)
+                            wrti.task = Task.Factory.StartNew(() => RequestExecutor(wrti), TaskCreationOptions.LongRunning);
+                        if (wrti.isResultReady)
+                        {
+                            wrti.webRequestOrder.completed.Set();
+                            var no = takeNextOrder();
+                            if (no is not null)
+                            {
+                                wrti.webRequestOrder = no;
+                                wrti.isResultReady = false;
+                                wrti.command = CMD.ExecuteRequest;
+                            }
+                            else
+                            {
+                                wrti.command = CMD.Exit;
+                                OrderQueueItemsToDelete.Add(wrti);
+                            }
+                            wrti.checkCommand.Set();
                         }
                         else
-                        {
-                            wrti.command = CMD.Exit;
-                            OrderQueueItemsToDelete.Add(wrti);
+                        { 
+                        
                         }
                     }
-                    wrti.isResultReady = false;
-                    wrti.checkCommand.Set();
+                    OrderQueueItemsToDelete.ForEach(x => WebRequestTaskInfoList.Remove(x));
+                    while (WebRequestTaskInfoList.Count < MaxWebRequestTask /*&& WebRequestOrderQueue.Count() > 0*/)
+                    {
+                        WebRequestOrder wro_next;
+                        if ((wro_next = takeNextOrder()) is null)
+                            break;
+                        var tn = WebRequestTaskInfoList.Select(x => x.taskNumber).ToList();
+                        var newTaskInfo = new WebRequestTaskInfo() { webRequestOrder = wro_next, isResultReady = false, taskNumber = Utils.getIDforNewRecord(tn), command = CMD.ExecuteRequest };
+                        WebRequestTaskInfoList.Add(newTaskInfo);
+                        newTaskInfo.task = Task.Factory.StartNew(() => RequestExecutor(newTaskInfo), TaskCreationOptions.LongRunning);
+                        newTaskInfo.checkCommand.Set();
+                    }
                 }
-                OrderQueueItemsToDelete.ForEach(x => WebRequestTaskInfoList.Remove(x));
-                while (WebRequestTaskInfoList.Count < MaxWebRequestTask /*&& WebRequestOrderQueue.Count() > 0*/)
-                { 
-                    var newTaskInfo = new WebRequestTaskInfo();
-                    newTaskInfo.webRequestOrder = takeNextOrder();
-                    if (newTaskInfo.webRequestOrder is null)
-                        break;
-                    newTaskInfo.command = CMD.ExecuteRequest;
-                    newTaskInfo.isResultReady = false;
-                    WebRequestTaskInfoList.Add(newTaskInfo);
-                    newTaskInfo.task= Task.Factory.StartNew(() => RequestExecutor(newTaskInfo), TaskCreationOptions.LongRunning);
-                    newTaskInfo.checkCommand.Set();
+                catch (Exception e)
+                {
+                    Console.WriteLine($"\n\n\n{nameof(RequestQueueController)}[th={Thread.CurrentThread.Name},({Thread.CurrentThread.ManagedThreadId})]{e.Message}\n\n\n");
+                    RequestQueueControllerTimeToCheck.Set();
                 }
             }
         }
         public static void RequestExecutor(WebRequestTaskInfo IO_Block)
         {
+            Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
             while (true)
             {
                 try
                 {
-                    IO_Block.checkCommand.WaitOne();
+                    IO_Block.checkCommand.WaitOne(20000);
                     if (IO_Block.command == CMD.StandBy)
                         continue;
 
@@ -516,7 +778,7 @@ namespace SB_Parser_API.MicroServices
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"\n\n\nRequestExecutor[t={IO_Block.taskNumber}]{e.Message}\n\n\n");
+                    Console.WriteLine($"\n\n\nRequestExecutor: [t={IO_Block.taskNumber}]{e.Message}\n\n\n");
                     IO_Block.webRequestOrder.requestDone = false;
                     IO_Block.isResultReady = false;
                     IO_Block.checkCommand.Set();
@@ -530,14 +792,19 @@ namespace SB_Parser_API.MicroServices
                 WebRequestOrderQueue.Add(wro);
 
             WaitHandle.SignalAndWait(RequestQueueControllerTimeToCheck, wro.completed);
-            
-            //WebRequestOrderQueueAdd.Set();
-            //wro.completed.WaitOne();
         }
+        public static AutoResetEvent GetWebInfoSetOrder(WebRequestOrder wro)
+        {
+            wro.created = DateTime.Now;
+            lock (WebRequestOrderQueueL)
+                WebRequestOrderQueue.Add(wro);
+            RequestQueueControllerTimeToCheck.Set();
+            return wro.completed;
+        }
+        public static Task GetWebInfoAsync(WebRequestOrder wro) => Task.Factory.StartNew(() => GetWebInfo(wro), TaskCreationOptions.LongRunning);
+
         public static GetInfo_Response GetInfoRequest(Func<HttpRequestMessage> requestGenerator,int PSnum = defaultNumberOfProxySubstitutions, int tOut = defaultTimeOut)
         {
-                        
-            
             return null!;
         }
         public static void AddUserAgent(HttpRequestMessage request)
@@ -606,7 +873,7 @@ namespace SB_Parser_API.MicroServices
                     WebRequestOrder wro = new() { url = uri };
                     wro.proxy = goodProxy is null ? wro.proxy : goodProxy;
                     wro.contentKeys.Add("class=country");
-                    wro.priority = Priority.Medium;
+                    wro.priority = Priority.Low;
                     wro.attempts = 100;
                     /*
                     wro.proxy.ip = "51.158.169.52";
@@ -624,7 +891,6 @@ namespace SB_Parser_API.MicroServices
                     else
                         goodProxy = null;
                 }
-
 
                 var document = htmlParser.ParseDocument(str);  // SOCKS4://182.52.19.252:3629 Uyukin SOCKS5://161.8.174.48:1080 SOCKS5://5.161.93.53:1080 http://176.192.70.58:8010 http://218.253.141.178:8080
                 // http://176.192.70.58:8006 http://79.175.51.212:29205
@@ -726,7 +992,7 @@ namespace SB_Parser_API.MicroServices
                     wro.proxy = goodProxy is null ? wro.proxy : goodProxy;
                     //wro.contentKeys.Add("class=country");
                     wro.attempts = 100;
-                    wro.priority = Priority.Medium;
+                    wro.priority = Priority.Low;
                     /*
                     wro.proxy.ip = "109.231.146.106";
                     wro.proxy.port = "31586";
@@ -807,6 +1073,8 @@ namespace SB_Parser_API.MicroServices
                 {
                     WebRequestOrder wro = new() { url = uri };
                     wro.contentKeys.Add("Free Proxy List");
+                    wro.priority = Priority.Low;
+
                     GetWebInfo(wro);
                     if (wro.requestDone)
                     {
@@ -927,6 +1195,7 @@ namespace SB_Parser_API.MicroServices
             Console.BackgroundColor = col;
             while (ChP_task.Length > 0)
             {
+                Console.WriteLine($"ThreadId={Environment.CurrentManagedThreadId},ChP_task.Count={ChP_task.Length}");
                 i = Task.WaitAny(ChP_task);
                 var pr = ChP_task[i].Result;
                 if (npCount > 0)
@@ -997,6 +1266,7 @@ namespace SB_Parser_API.MicroServices
             np.rate = np.rate ?? 0;
             np.lastRate = 0;
             var del = new List<int>();
+            HttpClient client = null!;
             var htmlParser = BrowsingContext.New(Configuration.Default).GetService<IHtmlParser>();
             string proxy = $"{np.protocol?.Replace("HTTPS","HTTP", (StringComparison)CompareOptions.IgnoreCase)}://{np.ip}:{np.port}";
             string res, st="", str = "", sts = "";
@@ -1035,7 +1305,7 @@ namespace SB_Parser_API.MicroServices
             var getLocation = (bool withProxy) =>
             {
                 Proxy pr = withProxy ? np : null!;
-                str = TryProxy(pr, @"https://api.ipgeolocation.io/ipgeo?apiKey=a02da4c62f664902bedd36ce10357ba4&ip=" + np.ip, "city"); //""
+                str = TryProxy(pr, @"https://api.ipgeolocation.io/ipgeo?apiKey=a02da4c62f664902bedd36ce10357ba4&ip=" + np.ip, "city",client); //""
                 if (str.Contains(PINGfailed)) str = "";
                 if (str.Length > 0)
                 {
@@ -1062,9 +1332,9 @@ namespace SB_Parser_API.MicroServices
             var delInc = (string site, string con, int inc) => {
                 var wdtimer = DateTime.Now;
                 if(inc>0)
-                    str = TryProxy(np, site, con); //TryProxy(proxy, site, con);
+                    str = TryProxy(np, site, con, client); //TryProxy(proxy, site, con);
                 else
-                    str = TryProxy(null!, site, con);  //str = TryProxy("", site, con);
+                    str = TryProxy(null!, site, con, client);  //str = TryProxy("", site, con);
 
                 if (str.Length > 0)
                 {
@@ -1112,7 +1382,7 @@ namespace SB_Parser_API.MicroServices
                 return (np);
             }
 */
-            if(!delInc(@"https://voice-assistant.ru/", "GoogleWebApi", 1000)) return np;
+            delInc(@"https://voice-assistant.ru/", "GoogleWebApi", 1000); //if(!delInc(@"https://voice-assistant.ru/", "GoogleWebApi", 1000)) return np;
             delInc(@"http://zakazportretov.ru", "Uyukin",1000);
             delInc(@"https://kdveri24.ru", "kdveri24", 1000);
             delInc(@"https://sbermarket.ru/api/stores/26", "store", 4000);
@@ -1247,10 +1517,10 @@ namespace SB_Parser_API.MicroServices
             Console.WriteLine($"The End of ({Thread.CurrentThread.ManagedThreadId})[{np.lastRate}]_{np.ip}:{np.port}_{np.location}_");
             return (np);
         }
-        static string TryProxy(Proxy proxy, string uri, string cont)
+        static string TryProxy(Proxy proxy, string uri, string cont, HttpClient client=null!)
         {
             var str = "";
-            var reqGen = () => {
+            /*var reqGen = () => {
                 var request = new HttpRequestMessage()
                 {
                     RequestUri = new Uri(uri),
@@ -1258,7 +1528,7 @@ namespace SB_Parser_API.MicroServices
                 };
                 AddUserAgent(request);
                 return request;
-            };
+            };*/
             //str = GetWebInfoSysOld(reqGen,proxy);
 
 
@@ -1273,8 +1543,10 @@ namespace SB_Parser_API.MicroServices
                 wro.proxy.port = proxy.port!;
                 wro.proxy.protocol = proxy.protocol!;
                 wro.proxy.domain = GetDomain(uri);
+                wro.proxy.client = client;
             }
             GetWebInfo(wro);
+            client = wro.proxy.client ?? client;
             if (!wro.givenProxyPingOk)
                 return $"{PINGfailed}";
             try { str = wro.textResponse(); } catch { }

@@ -1,10 +1,15 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using SB_Parser_API.Controllers;
+
+using SB_Parser_API.MicroServices;
 using static SB_Parser_API.MicroServices.DBSerices;
 using static SB_Parser_API.MicroServices.SearchViaBarcode;
 using static SB_Parser_API.MicroServices.WebAccessUtils;
+using static SB_Parser_API.MicroServices.SB_Parsers;
+
 using SB_Parser_API.Models;
+//using SB_Parser_API.MicroServices;
 //using static SB_Parser_API.MicroServices.SB_API;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
@@ -48,8 +53,8 @@ namespace SB_Parser_API
 
         //[DllImport("user32.dll", EntryPoint = "SetWindowPos")]
         //public static extern IntPtr SetWindowPos(IntPtr hWnd, int hWndInsertAfter, int x, int Y, int cx, int cy, int wFlags);
-
-        public static void Main(string[] args)
+        public static Task? reqQC;
+        public static async Task Main(string[] args)
         {
             //GetShops(55.911865, 37.734596, 5.5).Wait();
 
@@ -173,8 +178,8 @@ namespace SB_Parser_API
 
             //request.Headers.Add("cookie", "PAPVisitorId=fef4517aef9eff87737ba5ac529a786i; PAPVisitorId=fef4517aef9eff87737ba5ac529a786i; _ym_uid=16592862331034702442; _ym_d=1659286233; _ga=GA1.2.1985235452.1659286233; _gid=GA1.2.1581002767.1659286233; _ym_isad=2; _tt_enable_cookie=1; _ttp=fe6e411e-0057-4c2c-baca-dbb7e45e5695; _gat_UA-90263203-1=1; _dc_gtm_UA-90263203-1=1");
             Console.BackgroundColor = ConsoleColor.Black;
-            if (OperatingSystem.IsWindows())
-                Console.BufferHeight = 5000;
+            //if (OperatingSystem.IsWindows())
+              //  Console.BufferHeight = 5000;
 
             InitDBSerices();
             //goto m1;
@@ -220,7 +225,15 @@ namespace SB_Parser_API
             }
             Console.BackgroundColor = ConsoleColor.Black;
             */
-            var rqc = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning); //CheckDeadProxies(40);
+            reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning); //CheckDeadProxies(40);
+            var rqcCheck = Task.Factory.StartNew(() =>
+            {
+                Task.Delay(60000).Wait();
+                if (reqQC.IsCompleted || reqQC.IsFaulted || reqQC.IsCanceled)
+                    reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning);
+
+            }, TaskCreationOptions.LongRunning);
+
             /*
             WebRequestOrder wro = new();
             wro.url = "https://hidemy.name/ru/proxy-list/?anon=234&start=128";
@@ -229,8 +242,37 @@ namespace SB_Parser_API
             var txt = wro.textResponse();
             */
             //goto appGo;
-            GetShops(55.901223, 37.741567, 10).Wait();
-
+            /*            var cs = new Task[] 
+            { 
+                CollectShops("",1,3000), //HTTP://185.15.172.212:3128
+                CollectShops("", 3000, 6000), //SOCKS4://94.253.95.241:3629
+                CollectShops("", 6000, 9000), //HTTP://176.192.70.58:8014
+                CollectShops("", 9000, 12000), //HTTP://176.192.70.58:8017
+                CollectShops("", 12000, 15000), //HTTP://176.192.70.58:8022
+                CollectShops("", 15000, 18000),//HTTP://193.138.178.6:8282
+                CollectShops("", 18000, 21000),//SOCKS4://5.188.64.79:5678
+                CollectShops("", 21000, 24000), //HTTP://176.192.70.58:8029
+                CollectShops("", 24000, 27000), //HTTP://176.192.70.58:8006
+                CollectShops("", 27000, 30000),
+                CollectShops("", 30000, 33000),
+                CollectShops("", 33000, 36000),
+                CollectShops("", 36000, 39000),
+                CollectShops("", 39000, 44000),
+            };
+            
+            Task.WaitAll(cs);
+            */
+            //var bc = Utils.BarCodeCheck("03010615");
+            //CollectRetailers();
+            //await CollectShops("",17000, 50000,40);
+            //CollectProducts();
+            //SB_API.categoryGet(33388);
+            //return;
+            //CollectProducts();
+            //return;
+            //GetShops(55.901223, 37.741567, 10).Wait();
+            //GetDBParam(DBParam.TotalPriceScanners);
+            /*
             var chdpT = Task.Factory.StartNew(() => CheckDeadProxies(10), TaskCreationOptions.LongRunning); //CheckDeadProxies(40);
             var chpT = Task.Factory.StartNew(() => CheckProxies(40), TaskCreationOptions.LongRunning); //CheckProxies(40);
 
@@ -243,20 +285,22 @@ namespace SB_Parser_API
                     nextStart = DateTime.Now.AddMinutes(2);
                 Task.Delay((int)(nextStart-DateTime.Now).TotalMilliseconds).Wait();
             }
+            */
             //var txt = GetInfoSys(reqGen, $"http://176.192.70.58:8006"); //http://46.42.16.245:31565 //, "class=country" http://157.100.12.138:999
-
+            //SB_Parser_API.MicroServices.ZC_API.testAutoMapper();
             InitDBSerices();
+            /*
             dynamic dbc = GetDBContext(typeof(Retailer));
             var lr = dbc.Retailers;
             var ss = 43;
             ss += 12;
-            
-            CollectRetailers();
+            */
+            //CollectRetailers();
             //CollectShops().Wait();
             //CreateRequestAPI_3_0("");
             //GetShops(55.901223, 37.741567,10).Wait();
 
-            Thread.Sleep(3600000);
+            //Thread.Sleep(3600000);
 appGo:
             var builder = WebApplication.CreateBuilder(args);
 
@@ -282,10 +326,12 @@ appGo:
 
             app.UseHttpsRedirection();
             app.UseRouting();
-            app.UseEndpoints(endpoints =>
+#pragma warning disable ASP0014 // Suggest using top level route registrations
+            _ = app.UseEndpoints(endpoints =>
             {
                 endpoints.MapHub<ChatHub>("/chat");
             });
+#pragma warning restore ASP0014 // Suggest using top level route registrations
 
             //app.UseAuthorization();
 

@@ -7,17 +7,40 @@ namespace SB_Parser_API.Models
     public class WebModels
     {
         public const int defaultTimeOut = 30000; //ms
-        public const int MaxWebRequestTask = 110; //pcs.
-        public const int MinimalProxyPool = 30; //pcs.
+        public const int MaxWebRequestTask = 140; //pcs.
+        public const int MinimalProxyPool = 100; //pcs.
+        public const int MaxProxyRequestInArow = 300; // times.
+        //public const int MaxProxyErrorInArow = 3; // times.
         public const int defaultNumberOfProxySubstitutions = 20;
         public const string PINGfailed = "Proxy PING is failed";
-        public static List<WebRequestOrder> WebRequestOrderQueue = new();
-        public static object WebRequestOrderQueueL = new();
-        public static List<WebRequestTaskInfo> WebRequestTaskInfoList = new();
+        public const int ProxyToDomainListsRefreshInterval = 240; // seconds
+        public const int ProxyPerQuiryThread = 10;
+        public static List<WebRequestOrder> WebRequestOrderQueue { get; set; } = new();
+        public static object WebRequestOrderQueueL { get; set; } = new();
+        public static List<WebRequestTaskInfo> WebRequestTaskInfoList { get; set; } = new();
         //public static AutoResetEvent WebRequestOrderQueueAdd = new(false);
-        public static AutoResetEvent RequestQueueControllerTimeToCheck = new(false);
-        public static List<Proxy_to_Domain> ProxyToDomainList = null!;
+        public static AutoResetEvent RequestQueueControllerTimeToCheck { get; set; } = new(false);
+        //public static List<Proxy_to_Domain> ProxyToDomainList { get; set; }  = null!;
+        public record class ProxyToDomainContext
+        {
+            public List<Proxy_to_Domain> PD_List = new();
+            public List<Proxy_to_Domain> PD_ListToUpdate = new();
+            public int cursor = 0;
+            public int proxiesInUse = 0;
+        }
+        public static Dictionary<string, ProxyToDomainContext> ProxyToDomainLists { get; set; } = null!;
+        public static DateTime ProxyToDomainListsNextRefresh { get; set; } = DateTime.Now.AddSeconds(ProxyToDomainListsRefreshInterval);
     }
+    /*
+    public record class ProxyToDomainContext
+    {
+        public List<Proxy_to_Domain> PD_List = new();
+        public List<Proxy_to_Domain> PD_ListToUpdate = new();
+        public int cursor = 0;
+        public int proxiesInUse = 0;
+    }
+    */
+    public delegate void WRO_Action(WebRequestOrder x);
     public record class WebRequestOrder
     {
         public string url="";
@@ -34,13 +57,14 @@ namespace SB_Parser_API.Models
         public bool pingOnly = false;
         public bool pingOk = false;
         public bool requestDone = false;
-        public HttpResponseMessage response=null!;
+        public HttpResponseMessage response = null!;
         public int timeOut = defaultTimeOut;
         public int attempts = defaultNumberOfProxySubstitutions;
         public DateTime created = DateTime.Now;
-        public Priority priority = Priority.Low;
+        public Priority priority = Priority.Lowest;
         public string textResponse() { return response?.Content.ReadAsStringAsync().Result ?? ""; }
         public List<string> ResponseCookies() { return response.Headers.SingleOrDefault(header => header.Key == "Set-Cookie").Value.ToList(); }
+        public WRO_Action ProxyHeadersSetUp = null!;
     }
     public class RequestHeader
     {
@@ -49,11 +73,11 @@ namespace SB_Parser_API.Models
     }
     public enum CMD : int
     {
-        StandBy = 0, ExecuteRequest = 1, Exit = 2, Exited = 3
+        StandBy = 0, ExecuteRequest = 1, WriteDB = 2, Exit = 3, Exited = 4
     }
     public enum Priority : int
     {
-        High = 0, Medium = 1, Low = 2
+        Highest = 0, High = 1, MediumHigh = 2, Medium = 3, MediumLow = 4, Low = 5, Lowest = 6
     }
     public record class WebRequestTaskInfo
     {

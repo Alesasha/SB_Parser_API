@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Drawing;
 //using System.Configuration;
 //using Microsoft.Extensions.Configuration;
 
@@ -226,5 +227,309 @@ namespace SB_Parser_API.Models
 
         [JsonProperty("city.slug")]
         public string? city_slug { get; set; }
+
+        public int? last_product_count { get; set; }
+        public DateTime? lpc_dt { get; set; }
+    }
+
+    //[JsonConverter(typeof(JsonPathConverter))]
+    public class Category_SB_V2
+    {
+        public int id { get; set; }
+        public string? type { get; set; }
+        public string? name { get; set; }
+        public int products_count { get; set; }
+        //public List<object>? promo_services { get; set; }
+        public int position { get; set; }
+        public int depth { get; set; }
+        public string? description { get; set; }
+
+        //[JsonProperty("icon.mini_url")]
+        //public string? icon_mini { get; set; }
+
+        //[JsonProperty("icon.normal_url")]
+        //public string? icon_normal { get; set; }
+        //public object alt_icon { get; set; }
+        public record iconR(string? mini_url, string? normal_url);
+        public iconR? icon { get; set; }
+        public List<Category_SB_V2>? children { get; set; }
+        //public List<Requirement> requirements { get; set; }
+    }
+    
+    
+    [JsonConverter(typeof(JsonPathConverter))]
+    public class Product_SB_V2
+    {
+        public long id { get; set; }
+        public long? sku { get; set; }
+        public bool? active { get; set; }
+        public long? retailer_sku { get; set; }
+        public string? name { get; set; }
+
+        [NotMapped]
+        public double? price { get; set; }
+        [NotMapped]
+        public double? original_price { get; set; }
+        [NotMapped]
+        public double? discount { get; set; }
+        public string? human_volume { get; set; }
+        public double? volume { get; set; }
+        public string? volume_type { get; set; }
+        public int? items_per_pack { get; set; }
+        [NotMapped]
+        public DateTime? discount_ends_at { get; set; }
+        public string? price_type { get; set; }
+        public int? grams_per_unit { get; set; }
+        [NotMapped]
+        public double? unit_price { get; set; }
+        [NotMapped]
+        public double? original_unit_price { get; set; }
+        //public List<object> promo_badge_ids { get; set; }
+        public double? score { get; set; }
+        //public ScoreDetails score_details { get; set; }
+        //public List<object> labels { get; set; }
+
+        [NotMapped]
+        public List<SB_Image>? images { get; set; }
+        //public List<object> requirements { get; set; }
+        //public bool with_options { get; set; }
+        //public int? max_per_order { get; set; }
+        [NotMapped]
+        public double stock { get; set; }
+        //public List<string> marking_systems { get; set; }
+        //public List<object>? retailer_price { get; set; }
+        [NotMapped]
+        public List<string>? eans { get; set; }
+        //public string shipping_category_slug { get; set; }
+
+        public int? retailer { get; set; }
+        public int? store { get; set; }
+        public DateTime? dt_created { get; set; } = DateTime.Now;
+        public DateTime? dt_updated { get; set; } = DateTime.Now;
+    }
+    class Product_SB_V2_IdComparer : IEqualityComparer<Product_SB_V2>
+    {
+        // Products are equal if their id are equal.
+        public bool Equals(Product_SB_V2? x, Product_SB_V2? y)
+        {
+            //Check whether the compared objects reference the same data.
+            if (Object.ReferenceEquals(x, y)) return true;
+            //Check whether any of the compared objects is null.
+            if (x is null || y is null) return false;
+            //Check whether the products'id are equal.
+            return x.id == y.id;
+        }
+
+        // If Equals() returns true for a pair of objects
+        // then GetHashCode() must return the same value for these objects.
+
+        public int GetHashCode(Product_SB_V2 x)
+        {
+            //Check whether the object is null
+            if (Object.ReferenceEquals(x, null)) return 0;
+
+            //Get hash code for the id field if it is not null.
+            int hashId = x.id.GetHashCode();
+
+            //Calculate the hash code.
+            return hashId;
+        }
+    }
+
+    public class Price_SB_V2
+    {
+        [JsonProperty("notMapped")]
+        public int id { get; set; }
+        public DateTime? dt { get; set; }
+        public int? retailer { get; set; }
+        public int? store { get; set; }
+
+        //[Column("product_id")]
+        [JsonProperty("id")]
+        public long? product_id { get; set; }
+        public long? product_sku { get; set; }
+        public double? price { get; set; }
+        public double? original_price { get; set; }
+        public double? discount { get; set; }
+        public DateTime? discount_ends_at { get; set; }
+        public double? unit_price { get; set; }
+        public double? original_unit_price { get; set; }
+        public double stock { get; set; }
+    }
+    public class Meta_Products_SB_V2
+    {
+        public int current_page { get; set; }
+        public int? next_page { get; set; }
+        public int? previous_page { get; set; }
+        public int total_pages { get; set; }
+        public int per_page { get; set; }
+        public int total_count { get; set; }
+    }
+
+    [JsonConverter(typeof(JsonPathConverter))]
+    public class SB_Image
+    {
+        public int id { get; set; }
+
+        [NotMapped]
+        public long product_id { get; set; } = 0;
+
+        //public string? mini_url { get; set; }
+        //public string? small_url { get; set; }
+        //public string? product_url { get; set; }
+        //public string? preview_url { get; set; }
+
+        [JsonProperty("original_url")]
+        public string url { get; set; } = "";
+    }
+    public class SB_Barcode
+    {
+        public int id { get; set; }
+        [NotMapped]
+        public long product_id { get; set; } = 0;
+        public string barcode { get; set; } = "";
+    }
+    public class SB_barcode_product
+    {
+        public int id { get; set; }
+        public long product_id { get; set; } = 0;
+        public long product_sku { get; set; } = 0;
+        public int barcode_id { get; set; } = 0;
+    }
+    public class SB_image_product
+    {
+        public int id { get; set; }
+        public long product_id { get; set; } = 0;
+        public long product_sku { get; set; } = 0;
+        public int image_id { get; set; } = 0;
+    }
+
+    // Root myDeserializedClass = JsonConvert.DeserializeObject<Root>(myJsonResponse);
+
+    [JsonConverter(typeof(JsonPathConverter))]
+    public class Product_Details_SB_V2
+    {
+        public long id { get; set; }
+        public long? sku { get; set; }
+        public bool active { get; set; }
+        public long? retailer_sku { get; set; }
+        public string? name { get; set; }
+        public double? price { get; set; }
+        public double? original_price { get; set; }
+        public double? discount { get; set; }
+        public string? human_volume { get; set; }
+        public double? volume { get; set; }
+        public string? volume_type { get; set; }
+        public int items_per_pack { get; set; }
+        public DateTime? discount_ends_at { get; set; }
+        public string? price_type { get; set; }
+        public int grams_per_unit { get; set; }
+        public double? unit_price { get; set; }
+        public double? original_unit_price { get; set; }
+        public double? score { get; set; }
+        public List<SB_Image>? images { get; set; }
+        public List<Property_Product_SB_V2>? properties { get; set; }
+        public string? description { get; set; }
+        public List<Product_SB_V2>? related_products { get; set; }
+        public Main_Taxon_SB_V2? main_taxon { get; set; }
+        [JsonProperty("brand.id")]
+        public int brand_id { get; set; }
+        [JsonProperty("brand.name")]
+        public string? brand_name { get; set; }
+        [JsonProperty("store_id")]
+        public int? store { get; set; }
+        public int? retailer { get; set; }
+        public int max_per_order { get; set; }
+        public int stock { get; set; }
+        public string? vertical { get; set; }
+        //public ScoreDetails score_details { get; set; }
+        //public List<object> labels { get; set; }
+    }
+    public class Property_Product_SB_V2
+    {
+        public string? name { get; set; }
+        public string? presentation { get; set; }
+        public string? value { get; set; }
+    }
+    public class Property_Product_DB : Property_Product_SB_V2
+    {
+        public int id { get; set; }
+        public long product_id { get; set; }
+        public long product_sku { get; set; }
+    }
+
+    [JsonConverter(typeof(JsonPathConverter))]
+    public class Main_Taxon_SB_V2
+    {
+        public int id { get; set; }
+        public string type { get; set; } = "";
+        public string name { get; set; } = "";
+        public int products_count { get; set; }
+        public string? description { get; set; }
+        [JsonProperty("icon.normal_url")]
+        public string? icon_url { get; set; }
+        public string? alt_icon { get; set; }
+    }
+
+    // JSON Models for ZC_API
+
+    public class Product_From_Barcode_ZC
+    {
+        public long id { get; set; }
+        public long? sku { get; set; }
+        public bool? active { get; set; }
+        public string? name { get; set; }
+        public string? human_volume { get; set; }
+        public double? volume { get; set; }
+        public string? volume_type { get; set; }
+        public int? items_per_pack { get; set; }
+        public string? price_type { get; set; }
+        public int? grams_per_unit { get; set; }
+        public double? score { get; set; }
+        public List<string>? image_urls { get; set; }
+        public double stock { get; set; }
+        public string? barcode { get; set; }
+        public List<Property_Product_SB_V2>? properties { get; set; }
+        public List<Price_ZC>? prices { get; set; }
+        //public int user_id { get; set; } = 0;
+        //public long query_id { get; set; } = 0;
+    }
+
+    public record class Products_List_From_Barcode_ZC(long query_id, int user_id, List<Product_From_Barcode_ZC> products, string error="");
+
+    public class Price_ZC
+    {
+        public DateTime? dt { get; set; }
+        public int? retailer { get; set; }
+        public string? retailer_name { get; set; }
+        public string? retailer_logo_url { get; set; }
+        public string? retailer_mini_logo_url { get; set; }
+        public int? store { get; set; }
+        public long? product_id { get; set; }
+        public long? product_sku { get; set; }
+        public double? price { get; set; }
+        public double? original_price { get; set; }
+        public double? discount { get; set; }
+        public DateTime? discount_ends_at { get; set; }
+        public double? unit_price { get; set; }
+        public double? original_unit_price { get; set; }
+        public double stock { get; set; }
+    }
+    public class Query_ZC
+    {
+        public long id { get; set; }
+        public int user_id { get; set; }
+        public QueryType query_type { get; set; }
+        public string query { get; set; } = "";
+        public DateTime dt { get; set; } = DateTime.Now;
+    }
+    public enum QueryType : int
+    {
+        BarcodeSearch = 0, TextSearch = 1
+    }
+    public class Query_Type_ZC
+    {
+        public QueryType id { get; set; }
+        public string? type { get; set; }
     }
 }

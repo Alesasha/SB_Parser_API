@@ -18,6 +18,16 @@ namespace SB_Parser_API.Models
     {
         public DbSet<Retailer> Retailers => Set<Retailer>();
         public DbSet<Store> Stores => Set<Store>();
+        public DbSet<Product_SB_V2> Products => Set<Product_SB_V2>();
+        public DbSet<Property_Product_DB> ProductProperties => Set<Property_Product_DB>();
+        public DbSet<SB_Image> Images => Set<SB_Image>();
+        public DbSet<SB_Barcode> Barcodes => Set<SB_Barcode>();
+        public DbSet<SB_image_product> ImProds => Set<SB_image_product>();
+        public DbSet<SB_barcode_product> BarProds => Set<SB_barcode_product>();
+        public DbSet<Price_SB_V2> Prices => Set<Price_SB_V2>();
+        public DbSet<ZC_User> Users => Set<ZC_User>();
+        public DbSet<Query_ZC> Queries => Set<Query_ZC>();
+        public DbSet<Query_Type_ZC> QueryTypes => Set<Query_Type_ZC>();
         public PISBContext(DbContextOptions<PISBContext> options) : base(options) {}
         //protected readonly IConfiguration Configuration=null!;
         public PISBContext() => Database.EnsureCreated();
@@ -26,12 +36,13 @@ namespace SB_Parser_API.Models
             optionsBuilder.UseSqlServer(Get_DB_ConnectionString("PISB"),//"Name=PISB",//"Name=PISB", //Configuration.GetConnectionString("PISB")!
             options => options.EnableRetryOnFailure());
             optionsBuilder.EnableSensitiveDataLogging();
-            optionsBuilder.LogTo(System.Console.WriteLine, LogLevel.Information);
+            optionsBuilder.LogTo(System.Console.WriteLine, LogLevel.Error);
         }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<Retailer>(entity =>
             {
+                entity.ToTable("SB_Retailers");
                 entity.Property(e => e.id).ValueGeneratedNever();
                 entity.Property(e => e.contract_type).HasMaxLength(30);
                 entity.Property(e => e.description).HasMaxLength(255);
@@ -54,8 +65,9 @@ namespace SB_Parser_API.Models
 
             modelBuilder.Entity<Store>(entity =>
             {
+                entity.ToTable("SB_Stores");
                 entity.Property(e => e.id).ValueGeneratedNever();
-                entity.Property(e => e.building).HasMaxLength(100);
+                entity.Property(e => e.building).HasMaxLength(200);
                 entity.Property(e => e.city).HasMaxLength(200);
                 entity.Property(e => e.city_name).HasMaxLength(100);
                 entity.Property(e => e.city_slug).HasMaxLength(100);
@@ -72,6 +84,81 @@ namespace SB_Parser_API.Models
                 entity.Property(e => e.street).HasMaxLength(250);
                 entity.Property(e => e.time_zone).HasMaxLength(50);
                 entity.Property(e => e.uuid).HasMaxLength(50);
+            });
+            
+            modelBuilder.Entity<Product_SB_V2>(entity =>
+            {
+                entity.ToTable("SB_Products");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+                entity.Property(e => e.price_type).HasMaxLength(50);
+                entity.Property(e => e.volume_type).HasMaxLength(20);
+                entity.Property(e => e.human_volume).HasMaxLength(30);
+                entity.Property(e => e.name).HasMaxLength(300);
+            });
+
+            modelBuilder.Entity<Property_Product_DB>(entity =>
+            {
+                entity.ToTable("SB_Product_Properties");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+                entity.Property(e => e.name).HasMaxLength(100);
+                entity.Property(e => e.presentation).HasMaxLength(100);
+                entity.Property(e => e.value).HasMaxLength(2000);
+            });
+
+            modelBuilder.Entity<SB_Image>(entity =>
+            {
+                entity.ToTable("SB_Images");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+                entity.Property(e => e.url).HasMaxLength(500);
+            });
+            modelBuilder.Entity<SB_Barcode>(entity =>
+            {
+                entity.ToTable("SB_Barcodes");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+                entity.Property(e => e.barcode).HasMaxLength(100);
+            });
+            modelBuilder.Entity<SB_image_product>(entity =>
+            {
+                entity.ToTable("SB_image_product");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+            });
+            modelBuilder.Entity<SB_barcode_product>(entity =>
+            {
+                entity.ToTable("SB_barcode_product");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+            });
+            modelBuilder.Entity<Price_SB_V2>(entity =>
+            {
+                entity.ToTable("SB_Prices");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+            });
+            modelBuilder.Entity<ZC_User>(entity =>
+            {
+                entity.ToTable("ZC_Users");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+                entity.Property(e => e.info).HasMaxLength(500);
+            });
+            modelBuilder.Entity<Query_ZC>(entity =>
+            {
+                entity.ToTable("ZC_Queries");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+                entity.Property(e => e.query).HasMaxLength(250);
+            });
+            modelBuilder.Entity<Query_Type_ZC>(entity =>
+            {
+                entity.ToTable("ZC_Query_Types");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+                entity.Property(e => e.type).HasMaxLength(50);
             });
         }
     }
@@ -162,6 +249,9 @@ namespace SB_Parser_API.Models
                 entity.Property(e => e.port).HasMaxLength(50);
                 entity.Property(e => e.protocol).HasMaxLength(255);
                 entity.Property(e => e.domain).HasMaxLength(255);
+                entity.Property(e => e.parametrs).HasMaxLength(4000);
+                //entity.Ignore(e => e.getParametr);
+                //entity.Ignore(e => e.setParametr);
             });
 
             //OnModelCreatingPartial(modelBuilder);

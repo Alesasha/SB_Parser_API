@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations.Schema;
+﻿using Newtonsoft.Json;
+using System.ComponentModel.DataAnnotations.Schema;
 namespace SB_Parser_API.Models
 {
     //_________________________Reverse Engineering Models______________________________________//
@@ -99,7 +100,7 @@ Successfully saved ConnectionStrings:PISB = Data Source = 192.168.1.251;Initial 
         public string? valueS { get; set; }
     }
     //Proxy to Domain model
-    public class Proxy_to_Domain
+    public record class Proxy_to_Domain
     {
         public string ip { get; set; } = "";
         public string port { get; set; } = "";
@@ -109,7 +110,39 @@ Successfully saved ConnectionStrings:PISB = Data Source = 192.168.1.251;Initial 
         public int testOK { get; set; } = 0;
         public int rate { get; set; } = 0;
         public DateTime? lastCheck { get; set; } = DateTime.Now;
-        public string? userAgent { get; set; } = "";
+        public DateTime? inUseTill { get; set; } = DateTime.Now;
+        public string? parametrs { get; set; } = "";
+        public int requestCounterInArow { get; set; } = 0;
+        //public int errorCounterInArow { get; set; } = 0;
+
+        //public string? clientJSON { get { return JsonConvert.SerializeObject(client) ?? ""; } set { { JsonConvert.DeserializeObject<HttpClient>(value ?? ""); } } }
+
+        //client = (HttpClient?)JsonConvert.DeserializeObject(value ?? ""); } }
+
+        [NotMapped]
+        public HttpClient? client { get; set;} = null!;
+        public string? getParametr(string key)
+        {
+            try
+            {
+                return JsonConvert.DeserializeObject<Dictionary<string, string>>(parametrs!)?[key];
+            }
+            catch { return null; }
+        }
+        public bool setParametr(string key, string value)
+        {
+            try
+            {
+                var job = JsonConvert.DeserializeObject<Dictionary<string, string>>(parametrs!) ?? new();
+                job[key] = value;
+                parametrs = JsonConvert.SerializeObject(job);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        WRO_Action beforeRequest =null!;
+        WRO_Action afterRequest =null!;
     }
     // Custom comparer for the Proxy_to_Domain class
     class ProxyToDomainIpPortProtocolComparer : IEqualityComparer<Proxy_to_Domain>
@@ -145,5 +178,10 @@ Successfully saved ConnectionStrings:PISB = Data Source = 192.168.1.251;Initial 
             //Calculate the hash code for the product.
             return hashProductProtocol ^ hashProductIp ^ hashProductPort;
         }
+    }
+    public record class ZC_User
+    {
+        public int id { get; set; } = 0;
+        public string info { get; set; } = "";
     }
 }

@@ -13,7 +13,11 @@ using System.Transactions;
 using System.Web;
 using System.Data.Entity.Migrations;
 using static SB_Parser_API.MicroServices.Utils;
+using static SB_Parser_API.MicroServices.DBSerices;
 using System.Diagnostics;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using RandomUserAgent;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 
 //using System.Web.Mvc;
 //using System.Data.Objects.ObjectQuery;
@@ -77,9 +81,12 @@ namespace SB_Parser_API.MicroServices
             text = $"{{x:{text}}}";
             var ret = new List<int>();
             // JObject.Parse(text).SelectTokens("$..store_id").ToList().ForEach(x => ret.Add((int)x));
-
-            rUrl = "https://sbermarket.ru/api/stores/245/products?q=4600699503903";// &private_filters=with_similar:false,in_stock:false"; //19961 //1949
-            //rUrl = "https://sbermarket.ru/api/multisearches?lat=55.89551&lon=37.705562&q=4600699503903";
+            //rUrl = "https://sbermarket.ru/api/v3/stores/245/products?tid=moloko-sir-yajtsa-rastitelnie-produkti-8f15252%2Fsmetana&page=1&per_page=200";
+            rUrl = "https://sbermarket.ru/api/stores/245/products/smetana-ekomilk-30-bzmzh-200-g-e0feb7e";  //https://sbermarket.ru/api/stores/245/products/smetana-ekomilk-30-bzmzh-200-g-e0feb7e
+            //rUrl = "https://sbermarket.ru/api/v3/stores/172/products?tid=alkogol-cc137d2/shampanskoe-igristie-vina&page=1&per_page=200";
+            //rUrl = "https://sbermarket.ru/api/v3/stores/245/products?q=4600699503903";// 4600699503903 &private_filters=with_similar:false,in_stock:false"; //19961 //1949
+            //rUrl = "https://sbermarket.ru/api/v2/stories/products?search_query=4600699503903";
+            //rUrl = "https://sbermarket.ru/api/v1/multisearches?lat=55.89551&lon=37.705562&q=4600699503903";
             //rUrl = "https://sbermarket.ru/api//stores/1/products/slivki-pitievye-prostokvashino-ul-trapasterizovannye-10-bzmzh-350-ml-a0cbcaf";//4543 //stores/245/
             rUri = new Uri(rUrl); //rUrl
             request = new HttpRequestMessage()
@@ -87,12 +94,18 @@ namespace SB_Parser_API.MicroServices
                 RequestUri = rUri,
                 Method = HttpMethod.Get,
             };
-            request.Headers.Add("api-version", "3.0");
-            request.Headers.Add("client-token", "7ba97b6f4049436dab90c789f946ee2f");
-            request.Headers.Add("cookie", "ngenix_jscv_cd881f1695eb=cookie_expires=1670260316&cookie_signature=8n0fruhtWkYQt22oAykPDEUc8ww%3D"); //reachedTimer=1 1666358476
+            //request.Headers.Add("api-version", "3.0");
+            //request.Headers.Add("client-token", "7ba97b6f4049436dab90c789f946ee2f");
+            request.Headers.Add("referer", "https://sbermarket.ru/auchan/c/moloko-sir-yajtsa-rastitelnie-produkti-8f15252/smetana?sid=245&source=category");
+            //request.Headers.Add("referrer", "https://sbermarket.ru/");
+            //request.Headers.Add("authority", "sbermarket.ru");
+            //sbermarket.ru :authority: 
+            //request.Headers.Add("scheme", "https");
+            //request.Headers.Add("path", "api/stores/245/products/smetana-ekomilk-30-bzmzh-200-g-e0feb7e");
+            request.Headers.Add("cookie", "ngenix_jscv_cd881f1695eb=cookie_expires=1674201863&cookie_signature=bo36%2BePXn5PQKEN9tOxGkh%2B7lTw%3D"); //reachedTimer=1 1666358476
 
             //request.Headers.Add("referer", "referer: https://sbermarket.ru/auchan?sid=245"); //rUrl
-            request.Headers.Add("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.124 YaBrowser/22.9.4.863 Yowser/2.5 Safari/537.36");
+            request.Headers.Add("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36");
             //request.Headers.Add("sec-ch-ua", "Chromium\";v=\"106\", \"Google Chrome\";v=\"106\", \"Not;A=Brand\";v=\"99");
 
             response = await client.SendAsync(request);
@@ -108,6 +121,8 @@ namespace SB_Parser_API.MicroServices
                 var rnd = new Random();
                 //sc2 = UrlDecode(str2);
                 var sc2c = sc2.Replace("ngenix_jscc_66dcf4=", "");
+                sc2c = sc2c.Replace("; ", "&");
+                sc2c = sc2c.Replace(";", "&");
                 var data = sc2c.Split("&");
                 var ch_url = "https://sbermarket.ru"+HttpUtility.UrlDecode(data.Where(x => x.Contains("challenge_url")).FirstOrDefault()?.Replace("challenge_url=", ""));
                 var chc = data.FirstOrDefault(x => x.Contains("challenge_complexity"))?.Split('=')[1].ToString();
@@ -122,12 +137,12 @@ namespace SB_Parser_API.MicroServices
                     RequestUri = new Uri(ch_url),
                     Method = HttpMethod.Post,
                 };
-                request.Headers.Add("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.124 YaBrowser/22.9.4.863 Yowser/2.5 Safari/537.36");
+                request.Headers.Add("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36");
                 request.Headers.Add("cookie", sc2);
                 //request.Headers.Add("Content-Type", "application/x-www-form-urlencoded");
                 //var tcon = $"solution={rnd.Next(1000000)}";
 
-                Dictionary<string, string> fuecon = new Dictionary<string, string>
+                Dictionary<string, string> fuecon = new()
                 {
                     ["solution"] = jsres,
                 };
@@ -157,134 +172,10 @@ namespace SB_Parser_API.MicroServices
 
             Console.WriteLine($"lat={lat}, lon={lon}, {nameof(radius)}={radius}");
         }
-        public static async Task CollectShops()
+
+         public static string FindSolutionScript(string chc, string chs)
         {
-            HttpResponseMessage? response = null;
-            HttpRequestMessage? request = null;
-            var handler = new HttpClientHandler()
-            {
-                Proxy = new WebProxy(new Uri($"http://46.42.16.245:31565")),
-                UseProxy = true,
-            };
-
-            HttpClient client = new HttpClient(handler);
-            client.Timeout = TimeSpan.FromMilliseconds(20000);
-            int imax = 0;
-            using (var db = new PISBContext())
-            {
-                var stores = db.Stores.ToList();
-                imax=stores.Max(x=>x.id);
-
-            }
-            int emptyLinks = 0;
-            for (var i = imax + 1; emptyLinks < 100 && i < 100000; i++)
-            {
-                string rUrl = $"https://sbermarket.ru/api/stores/{i}";
-                var rUri = new Uri(rUrl);
-                string text;
-                while (true)
-                {
-                    try
-                    {
-                        request = new HttpRequestMessage()
-                        {
-                            RequestUri = rUri,
-                            Method = HttpMethod.Get,
-                        };
-                        response = await client.SendAsync(request);
-                        IEnumerable<string> cookies = response.Headers.SingleOrDefault(header => header.Key == "Set-Cookie").Value;
-                        text = response.Content.ReadAsStringAsync().Result;
-                        break;
-                    }
-                    catch (Exception e) { Console.WriteLine($"Call Point 001: {e.Message}"); request?.Dispose(); await Task.Delay(3000); continue; }
-                }
-
-                if (text.Contains("error"))
-                {
-                    emptyLinks++;
-                    continue;
-                }
-
-                var sto = JObject.Parse(text).SelectToken("$.store")?.ToObject<Store>();
-
-                using (var db = new PISBContext())
-                {
-
-
-                    var stores = db.Stores.ToList();
-                    // добавляем их в бд
-
-                    var ob = stores.FirstOrDefault(x => x.id == sto!.id)!;
-
-                    if (ob != null) db.Stores.Remove(ob);
-                    db.Stores.Add(sto!);
-                    while (true)
-                    {
-                        try
-                        {
-                            db.SaveChanges();
-                            break;
-                        }
-                        catch (Exception e) { Console.WriteLine($"Call Point 002: {e.Message}"); await Task.Delay(3000); continue; }
-                    }
-                    Console.Clear();
-                    Console.WriteLine("Объекты успешно сохранены");
-
-                    // получаем объекты из бд и выводим на консоль
-                    stores = db.Stores.OrderBy(x => x.id).ToList();
-                    Console.WriteLine("Список объектов:");
-                    foreach (var s in stores)
-                    {
-                        Console.WriteLine($"{s.id}.{s.name} - {s.city}");
-                    }
-                }
-                emptyLinks = 0;
-                await Task.Delay(2000);
-            }
-
-        }
-        public static void CollectRetailers() //async Task
-        {
-            var text = SB_API.Retailers();//response.Content.ReadAsStringAsync().Result;
-            var ret = JObject.Parse(text!).SelectToken("$.retailers")?.ToObject<List<Retailer>>();
-
-#pragma warning disable CA1416 // Проверка совместимости платформы
-            Console.BufferHeight = 10000;
-#pragma warning restore CA1416 // Проверка совместимости платформы
-
-            using var db = new PISBContext();
-            //db.Database.Log = s => System.Diagnostics.Debug.WriteLine(s);
-            //var sql = ((dynamic)flooringStoresProducts).Sql;
-            //db.Database?.Log = Console.Write;
-
-            var rets = db.Retailers.ToList();
-            //var et=db.Model.GetEntityTypes();
-            // добавляем их в бд
-
-            foreach (var r in ret!)
-            {
-                var ob = rets.FirstOrDefault(x => x.id == r.id)!;
-                //int ind = rets.FindIndex(x => x.id == r.id);
-                if (ob != null) db.Retailers.Remove(ob);
-                db.Retailers.Add(r); //ob = r; AddOrUpdate
-                                     //db.Entry(r).State = Microsoft.EntityFrameworkCore.EntityState.Modified; //System.Data.Entity.EntityState.Modified;
-            }
-
-            db.SaveChanges();
-
-            Console.WriteLine("Объекты успешно сохранены");
-
-            // получаем объекты из бд и выводим на консоль
-            rets = db.Retailers.OrderBy(x => x.id).ToList();
-            Console.WriteLine("Список объектов:");
-            foreach (var r in rets)
-            {
-                Console.WriteLine($"{r.id}.{r.name} - {r.slug}");
-            }
-        }
-        public static string FindSolutionScript(string chc, string chs)
-        {
-            string fg  = """
+            string SBscript = """
                  'use strict';
                 var chc = chc_value;
                 var chs = 'chs_value';
@@ -406,7 +297,7 @@ namespace SB_Parser_API.MicroServices
                     return resultArr;
                   } 
                 """;
-            string SBscript = "'use strict';\r\nvar chc = chc_value;\r\nvar chs = 'chs_value';\r\na0_0x476ee4({challenge_complexity:chc,challenge_signature:decodeURIComponent(chs)});\r\nfunction a0_0x476ee4(message) {\r\n    var result = parseInt(Math.random() * 1e6);\r\n    var valCamelCase = null;\r\n    var value = message.challenge_complexity;\r\n    var output = message.challenge_signature;\r\n    for (; valCamelCase != value;) {\r\n      result = result + 1;\r\n      valCamelCase = a0_0x4f6498(a0_0x2704ae(output + String(result)));\r\n    }\r\n    return result = String(result), result;\r\n  }\r\n  function a0_0x4f6498(data) {\r\n    var waitBeforeReconnect = 0;\r\n    var i = 0;\r\n    for (; i < data.length; i++) {\r\n      var reconnectTimeIncrease = a0_0x377fa3(data[i]);\r\n      waitBeforeReconnect = waitBeforeReconnect + reconnectTimeIncrease;\r\n      if (reconnectTimeIncrease < 8) {\r\n        break;\r\n      }\r\n    }\r\n    return waitBeforeReconnect;\r\n  }\r\n  function a0_0x377fa3(canCreateDiscussions) {\r\n    var rudhvi = 0;\r\n    if (canCreateDiscussions > 0) {\r\n      for (; (canCreateDiscussions & 128) == 0;) {\r\n        canCreateDiscussions = canCreateDiscussions << 1;\r\n        rudhvi++;\r\n      }\r\n      return rudhvi;\r\n    } else {\r\n      return 8;\r\n    }\r\n  }\r\n  function a0_0x2704ae(data) {\r\n    return a0_0x5e7c4f(a0_0x551f03(a0_0x9956db(data), data.length * 8));\r\n  }\r\n  function a0_0x5e7c4f(myPreferences) {\r\n    var PL$86 = [];\r\n    var ret = 0;\r\n    for (; ret < myPreferences.length * 32; ret = ret + 8) {\r\n      PL$86.push(myPreferences[ret >> 5] >>> 24 - ret % 32 & 255);\r\n    }\r\n    return PL$86;\r\n  }\r\n  function a0_0x551f03(data, i) {\r\n    data[i >> 5] |= 128 << 24 - i % 32;\r\n    data[(i + 64 >> 9 << 4) + 15] = i;\r\n    var intArray = Array(80);\r\n    var height = 1732584193;\r\n    var value = -271733879;\r\n    var c = -1732584194;\r\n    var d = 271733878;\r\n    var e = -1009589776;\r\n    var index = 0;\r\n    for (; index < data.length; index = index + 16) {\r\n      var y = height;\r\n      var options = value;\r\n      var oldc = c;\r\n      var oldd = d;\r\n      var olde = e;\r\n      var i = 0;\r\n      for (; i < 80; i++) {\r\n        if (i < 16) {\r\n          intArray[i] = data[index + i];\r\n        } else {\r\n          intArray[i] = (intArray[i - 3] ^ intArray[i - 8] ^ intArray[i - 14] ^ intArray[i - 16]) << 1 | (intArray[i - 3] ^ intArray[i - 8] ^ intArray[i - 14] ^ intArray[i - 16]) >>> 31;\r\n        }\r\n        var MIN_UNIT = a0_0x31d2c0(a0_0x31d2c0(height << 5 | height >>> 27, a0_0x14a0bd(i, value, c, d)), a0_0x31d2c0(a0_0x31d2c0(e, intArray[i]), a0_0x10807a(i)));\r\n        e = d;\r\n        d = c;\r\n        c = value << 30 | value >>> 2;\r\n        value = height;\r\n        height = MIN_UNIT;\r\n      }\r\n      height = a0_0x31d2c0(height, y);\r\n      value = a0_0x31d2c0(value, options);\r\n      c = a0_0x31d2c0(c, oldc);\r\n      d = a0_0x31d2c0(d, oldd);\r\n      e = a0_0x31d2c0(e, olde);\r\n    }\r\n    return Array(height, value, c, d, e);\r\n  }\r\n  function a0_0x31d2c0(x, y) {\r\n    var uch = (x & 65535) + (y & 65535);\r\n    var dwch = (x >> 16) + (y >> 16) + (uch >> 16);\r\n    return dwch << 16 | uch & 65535;\r\n  }\r\n  function a0_0x14a0bd(aRoundNumber, nChunkB, nChunkC, nChunkD) {\r\n    if (aRoundNumber < 20) {\r\n      return nChunkB & nChunkC | ~nChunkB & nChunkD;\r\n    }\r\n    if (aRoundNumber < 40) {\r\n      return nChunkB ^ nChunkC ^ nChunkD;\r\n    }\r\n    if (aRoundNumber < 60) {\r\n      return nChunkB & nChunkC | nChunkB & nChunkD | nChunkC & nChunkD;\r\n    }\r\n    return nChunkB ^ nChunkC ^ nChunkD;\r\n  }\r\n  function a0_0x10807a(aRoundNumber) {\r\n    return aRoundNumber < 20 ? 1518500249 : aRoundNumber < 40 ? 1859775393 : aRoundNumber < 60 ? -1894007588 : -899497514;\r\n  }\r\n  function a0_0x9956db(data) {\r\n    var resultArr = Array(data.length >> 2);\r\n    var i = 0;\r\n    for (; i < resultArr.length; i++) {\r\n      resultArr[i] = 0;\r\n    }\r\n    i = 0;\r\n    for (; i < data.length * 8; i = i + 8) {\r\n      resultArr[i >> 5] |= (data.charCodeAt(i / 8) & 255) << 24 - i % 32;\r\n    }\r\n    return resultArr;\r\n  }";
+            //string SBscript = "'use strict';\r\nvar chc = chc_value;\r\nvar chs = 'chs_value';\r\na0_0x476ee4({challenge_complexity:chc,challenge_signature:decodeURIComponent(chs)});\r\nfunction a0_0x476ee4(message) {\r\n    var result = parseInt(Math.random() * 1e6);\r\n    var valCamelCase = null;\r\n    var value = message.challenge_complexity;\r\n    var output = message.challenge_signature;\r\n    for (; valCamelCase != value;) {\r\n      result = result + 1;\r\n      valCamelCase = a0_0x4f6498(a0_0x2704ae(output + String(result)));\r\n    }\r\n    return result = String(result), result;\r\n  }\r\n  function a0_0x4f6498(data) {\r\n    var waitBeforeReconnect = 0;\r\n    var i = 0;\r\n    for (; i < data.length; i++) {\r\n      var reconnectTimeIncrease = a0_0x377fa3(data[i]);\r\n      waitBeforeReconnect = waitBeforeReconnect + reconnectTimeIncrease;\r\n      if (reconnectTimeIncrease < 8) {\r\n        break;\r\n      }\r\n    }\r\n    return waitBeforeReconnect;\r\n  }\r\n  function a0_0x377fa3(canCreateDiscussions) {\r\n    var rudhvi = 0;\r\n    if (canCreateDiscussions > 0) {\r\n      for (; (canCreateDiscussions & 128) == 0;) {\r\n        canCreateDiscussions = canCreateDiscussions << 1;\r\n        rudhvi++;\r\n      }\r\n      return rudhvi;\r\n    } else {\r\n      return 8;\r\n    }\r\n  }\r\n  function a0_0x2704ae(data) {\r\n    return a0_0x5e7c4f(a0_0x551f03(a0_0x9956db(data), data.length * 8));\r\n  }\r\n  function a0_0x5e7c4f(myPreferences) {\r\n    var PL$86 = [];\r\n    var ret = 0;\r\n    for (; ret < myPreferences.length * 32; ret = ret + 8) {\r\n      PL$86.push(myPreferences[ret >> 5] >>> 24 - ret % 32 & 255);\r\n    }\r\n    return PL$86;\r\n  }\r\n  function a0_0x551f03(data, i) {\r\n    data[i >> 5] |= 128 << 24 - i % 32;\r\n    data[(i + 64 >> 9 << 4) + 15] = i;\r\n    var intArray = Array(80);\r\n    var height = 1732584193;\r\n    var value = -271733879;\r\n    var c = -1732584194;\r\n    var d = 271733878;\r\n    var e = -1009589776;\r\n    var index = 0;\r\n    for (; index < data.length; index = index + 16) {\r\n      var y = height;\r\n      var options = value;\r\n      var oldc = c;\r\n      var oldd = d;\r\n      var olde = e;\r\n      var i = 0;\r\n      for (; i < 80; i++) {\r\n        if (i < 16) {\r\n          intArray[i] = data[index + i];\r\n        } else {\r\n          intArray[i] = (intArray[i - 3] ^ intArray[i - 8] ^ intArray[i - 14] ^ intArray[i - 16]) << 1 | (intArray[i - 3] ^ intArray[i - 8] ^ intArray[i - 14] ^ intArray[i - 16]) >>> 31;\r\n        }\r\n        var MIN_UNIT = a0_0x31d2c0(a0_0x31d2c0(height << 5 | height >>> 27, a0_0x14a0bd(i, value, c, d)), a0_0x31d2c0(a0_0x31d2c0(e, intArray[i]), a0_0x10807a(i)));\r\n        e = d;\r\n        d = c;\r\n        c = value << 30 | value >>> 2;\r\n        value = height;\r\n        height = MIN_UNIT;\r\n      }\r\n      height = a0_0x31d2c0(height, y);\r\n      value = a0_0x31d2c0(value, options);\r\n      c = a0_0x31d2c0(c, oldc);\r\n      d = a0_0x31d2c0(d, oldd);\r\n      e = a0_0x31d2c0(e, olde);\r\n    }\r\n    return Array(height, value, c, d, e);\r\n  }\r\n  function a0_0x31d2c0(x, y) {\r\n    var uch = (x & 65535) + (y & 65535);\r\n    var dwch = (x >> 16) + (y >> 16) + (uch >> 16);\r\n    return dwch << 16 | uch & 65535;\r\n  }\r\n  function a0_0x14a0bd(aRoundNumber, nChunkB, nChunkC, nChunkD) {\r\n    if (aRoundNumber < 20) {\r\n      return nChunkB & nChunkC | ~nChunkB & nChunkD;\r\n    }\r\n    if (aRoundNumber < 40) {\r\n      return nChunkB ^ nChunkC ^ nChunkD;\r\n    }\r\n    if (aRoundNumber < 60) {\r\n      return nChunkB & nChunkC | nChunkB & nChunkD | nChunkC & nChunkD;\r\n    }\r\n    return nChunkB ^ nChunkC ^ nChunkD;\r\n  }\r\n  function a0_0x10807a(aRoundNumber) {\r\n    return aRoundNumber < 20 ? 1518500249 : aRoundNumber < 40 ? 1859775393 : aRoundNumber < 60 ? -1894007588 : -899497514;\r\n  }\r\n  function a0_0x9956db(data) {\r\n    var resultArr = Array(data.length >> 2);\r\n    var i = 0;\r\n    for (; i < resultArr.length; i++) {\r\n      resultArr[i] = 0;\r\n    }\r\n    i = 0;\r\n    for (; i < data.length * 8; i = i + 8) {\r\n      resultArr[i >> 5] |= (data.charCodeAt(i / 8) & 255) << 24 - i % 32;\r\n    }\r\n    return resultArr;\r\n  }";
             SBscript = SBscript.Replace("chc_value", chc).Replace("chs_value", chs);
             return SBscript;
         }

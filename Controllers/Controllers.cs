@@ -7,9 +7,14 @@ using static SB_Parser_API.MicroServices.SearchViaBarcode;
 using SB_Parser_API.Models;
 using System;
 using static SB_Parser_API.MicroServices.WebAccessUtils;
+using static SB_Parser_API.MicroServices.ZC_API;
 using System.Drawing;
 using static System.Net.Mime.MediaTypeNames;
 using Image = System.Drawing.Image;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Serialization;
+using System.Globalization;
 
 namespace SB_Parser_API.Controllers
 {
@@ -79,16 +84,16 @@ namespace SB_Parser_API.Controllers
 
     [ApiController]
     [Route("api/[controller]")]
-    public class BarCodeRequestController : ControllerBase
+    public class BarCodeRequestTestController : ControllerBase
     {
         private static readonly string[] Summaries = new[]
         {
         "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
         };
 
-        private readonly ILogger<BarCodeRequestController> _logger;
+        private readonly ILogger<BarCodeRequestTestController> _logger;
 
-        public BarCodeRequestController(ILogger<BarCodeRequestController> logger)
+        public BarCodeRequestTestController(ILogger<BarCodeRequestTestController> logger)
         {
             _logger = logger;
         }
@@ -109,6 +114,41 @@ namespace SB_Parser_API.Controllers
                 TemperatureC = Random.Shared.Next(-20, 55),
                 Summary = Summaries[Random.Shared.Next(Summaries.Length)] + $"... at the moment {Name} id={id} (Age={Age})"
             };
+        }
+    }
+    [ApiController]
+    [Route("api/[controller]")]
+    public class BarCodeRequestController : ControllerBase
+    {
+        private readonly ILogger<BarCodeRequestController> _logger;
+
+        public BarCodeRequestController(ILogger<BarCodeRequestController> logger)
+        {
+            _logger = logger;
+        }
+
+        [HttpGet("{query_id:long?}")]
+        public string Get(string barcode = "", int user_id = 0, long query_id = 0)
+        {
+            //return ($"bar={barcode},user_id={user_id},query_id={query_id}");
+            var context = Response.HttpContext;
+            foreach (var o in Request.RouteValues)
+            {
+                Debug.WriteLine($"{o.Key}, {o.Value}");
+                Console.WriteLine($"{o.Key}, {o.Value}");
+            }
+            string uinfo = "";
+            if (Request.HasJsonContentType()) 
+            {
+                var stream = new StreamReader(Request.Body);
+                uinfo = stream.ReadToEnd();
+            }
+            var user = new ZC_User() { id = user_id, info = uinfo };
+
+            //HttpClient client = new HttpClient();
+            var products = productInfoListFromBarcode(barcode, user, query_id);
+
+            return JsonConvert.SerializeObject(products);
         }
     }
     public class ChatHub : Hub

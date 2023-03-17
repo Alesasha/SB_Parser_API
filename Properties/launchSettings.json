@@ -9,7 +9,7 @@
     }
   },
   "ConnectionStrings": {
-    "PIDB": "Data Source=192.168.1.251;Initial Catalog=PIDB;User ID=sa;Password=asdgh125As;Connection Timeout=360;TrustServerCertificate=true;"
+    "PIDB": "Data Source=192.168.1.200;Initial Catalog=PIDB;User ID=sa;Password=asdgh125As;Connection Timeout=720;TrustServerCertificate=true;" //192.168.1.251
   },
   "profiles": {
     "SB_Parser_API": {
