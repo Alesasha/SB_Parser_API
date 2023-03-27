@@ -10,7 +10,7 @@ using static SB_Parser_API.MicroServices.SB_Parsers;
 
 using SB_Parser_API.Models;
 //using SB_Parser_API.MicroServices;
-//using static SB_Parser_API.MicroServices.SB_API;
+using static SB_Parser_API.MicroServices.SB_API;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 //using SB_Parser_API.Models;
@@ -23,6 +23,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections;
+using static System.Web.HttpUtility;
+using System.Text.Encodings.Web;
 
 namespace SB_Parser_API
 {
@@ -182,6 +184,7 @@ namespace SB_Parser_API
               //  Console.BufferHeight = 5000;
 
             InitDBSerices();
+            productNames = GetProductNamesForSearch() ?? new();
             //goto m1;
 
             /*
@@ -264,10 +267,10 @@ namespace SB_Parser_API
             */
             //var bc = Utils.BarCodeCheck("03010615");
             //CollectRetailers();
-            //await CollectShops("",17000, 50000,40);
+            await CollectShops("", 1, 50000, 40);
             //CollectProducts();
             //SB_API.categoryGet(33388);
-            //return;
+            return;
             //CollectProducts();
             //return;
             //GetShops(55.901223, 37.741567, 10).Wait();
@@ -298,7 +301,9 @@ namespace SB_Parser_API
             //CollectRetailers();
             //CollectShops().Wait();
             //CreateRequestAPI_3_0("");
+            //var sl = productMultiSearch(55.908399, 37.730014, "молоко", Priority.Low);
             //GetShops(55.901223, 37.741567,10).Wait();
+            //Init_AddOrUpdateProductsBatch();
 
             //Thread.Sleep(3600000);
 appGo:

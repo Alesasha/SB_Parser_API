@@ -15,6 +15,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
 using System.Globalization;
+using static System.Web.HttpUtility;
 
 namespace SB_Parser_API.Controllers
 {
@@ -128,7 +129,7 @@ namespace SB_Parser_API.Controllers
         }
 
         [HttpGet("{query_id:long?}")]
-        public string Get(string barcode = "", int user_id = 0, long query_id = 0)
+        public string Get(string barcode = "", int user_id = 0, long query_id = 0, double lat = 0, double lon = 0, double radius = 0)
         {
             //return ($"bar={barcode},user_id={user_id},query_id={query_id}");
             var context = Response.HttpContext;
@@ -137,20 +138,59 @@ namespace SB_Parser_API.Controllers
                 Debug.WriteLine($"{o.Key}, {o.Value}");
                 Console.WriteLine($"{o.Key}, {o.Value}");
             }
-            string uinfo = "";
-            if (Request.HasJsonContentType()) 
+            foreach (var o in Request.Query)
             {
-                var stream = new StreamReader(Request.Body);
-                uinfo = stream.ReadToEnd();
+                Debug.WriteLine($"{o.Key}, {o.Value}");
+                Console.WriteLine($"{o.Key}, {o.Value}");
             }
-            var user = new ZC_User() { id = user_id, info = uinfo };
+
+            var currentRequest = CreateActiveRequest(Request, Response);
 
             //HttpClient client = new HttpClient();
-            var products = productInfoListFromBarcode(barcode, user, query_id);
+            var products = productInfoListFromBarcode(currentRequest);
 
             return JsonConvert.SerializeObject(products);
         }
     }
+
+    [ApiController]
+    [Route("api/[controller]")]
+    public class TextSearchController : ControllerBase
+    {
+        private readonly ILogger<TextSearchController> _logger;
+
+        public TextSearchController(ILogger<TextSearchController> logger)
+        {
+            _logger = logger;
+        }
+
+        [HttpGet("{query_id:long?}")]
+        public string Get(string query = "", int user_id = 0, long query_id = 0, double lat=0, double lon = 0, double radius = 0)
+        {
+            //return ($"bar={barcode},user_id={user_id},query_id={query_id}");
+            var context = Response.HttpContext;
+            foreach (var o in Request.RouteValues)
+            {
+                Debug.WriteLine($"{o.Key}, {o.Value}");
+                Console.WriteLine($"{o.Key}, {o.Value}");
+            }
+            foreach (var o in Request.Query)
+            {
+                Debug.WriteLine($"{o.Key}, {o.Value}");
+                Console.WriteLine($"{o.Key}, {o.Value}");
+            }
+
+            var currentRequest = CreateActiveRequest(Request, Response);
+
+            currentRequest.take = currentRequest.take ?? 30;
+
+            //HttpClient client = new HttpClient();
+            var products = productInfoListFromTextQuery(currentRequest);
+
+            return JsonConvert.SerializeObject(products);
+        }
+    }
+
     public class ChatHub : Hub
     {
         public async Task Send(string message)

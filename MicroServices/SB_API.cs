@@ -34,11 +34,14 @@ namespace SB_Parser_API.MicroServices
         public static string CategoryURL_V2(int store = 1) => $"https://sbermarket.ru/api/v2/categories?depth=1&reset_cache=true&sid={store}";
         public static string StoreInfo(int store) => $"https://sbermarket.ru/api/stores/{store}";
         public static string ProductInfo(long product_id) => $"https://sbermarket.ru/api/v2/products/{product_id}?sid=1";
+        
+        public static string MultiSearchQueryURL_V3(double lat, double lon, string query) => $"https://sbermarket.ru/api/v3/multisearches?lat={lat.ToString().Replace(",", ".")}&lon={lon.ToString().Replace(",", ".")}&q={UrlEncode(query)}&include[]=retailer";
 
         public static List<string> ImageFolders { get; set; } = new() { "width-auto", "size-64-64", "size-192-185", "size-210-210", "size-680-680", };
 
         //https://sbermarket.ru/api/categories?depth=1&reset_cache=true&store_id=1
         //https://sbermarket.ru/api/stores/19961/products?q=4607161622308&page=1&per_page=15
+        //https://sbermarket.ru/api/v3/multisearches?lat=55.908399&lon=37.730014&q=молоко 3.2&include[]=retailer&include[]=closest_shipping_options&shipping_method=delivery
 
         public static void setUpSBToken(WebRequestOrder wro)
         {
@@ -113,6 +116,24 @@ namespace SB_Parser_API.MicroServices
             }
             return null;
         }
+
+        public static List<Multi_Search_Result> productMultiSearch(double lat, double lon, string query, Priority prio = Priority.Low)
+        {
+            var wro = new WebRequestOrder() { url = MultiSearchQueryURL_V3(lat, lon, query), needProxy = true, priority = prio };
+            wro.headers.Add(new() { key = nameof(api_version).Replace("_", "-"), value = api_version });
+            wro.headers.Add(new() { key = nameof(client_token).Replace("_", "-"), value = client_token });
+            wro.contentKeys.Add("[");
+            //wro.timeOut = 40000;
+            //wro.needProxy = false;
+            //wro.proxy = ProxyToDomainGet(new Proxy_to_Domain() { ip = $"185.15.172.212", port = $"3128", protocol = $"HTTP", domain = $"https://sbermarket.ru" }).FirstOrDefault()!;
+            GetWebInfo(wro);
+            var txt = wro.textResponse();
+            if (txt.Contains("error")) return new();
+            var shopList = JsonConvert.DeserializeObject<List<Multi_Search_Result>>(txt) ?? new();
+            //var shopList = JObject.Parse(txt!).ToObject<List<Multi_Search_Result>>() ?? new();
+            return shopList;
+        }
+
         public static HttpRequestMessage CreateRequest(string url)
         {
             var rUri = new Uri(url);

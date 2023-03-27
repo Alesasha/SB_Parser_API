@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Drawing;
+using Azure;
 //using System.Configuration;
 //using Microsoft.Extensions.Configuration;
 
@@ -336,14 +337,14 @@ namespace SB_Parser_API.Models
         }
     }
 
-    public class Price_SB_V2
+    public record Price_SB_V2
     {
         [JsonProperty("notMapped")]
         public int id { get; set; }
         public DateTime? dt { get; set; }
+        public DateTime? dt_created { get; set; }
         public int? retailer { get; set; }
         public int? store { get; set; }
-
         //[Column("product_id")]
         [JsonProperty("id")]
         public long? product_id { get; set; }
@@ -355,7 +356,9 @@ namespace SB_Parser_API.Models
         public double? unit_price { get; set; }
         public double? original_unit_price { get; set; }
         public double stock { get; set; }
+        public int update_counter { get; set; }
     }
+
     public class Meta_Products_SB_V2
     {
         public int current_page { get; set; }
@@ -488,14 +491,18 @@ namespace SB_Parser_API.Models
         public double? score { get; set; }
         public List<string>? image_urls { get; set; }
         public double stock { get; set; }
-        public string? barcode { get; set; }
+        public List<string>? barcodes { get; set; } = new();
         public List<Property_Product_SB_V2>? properties { get; set; }
         public List<Price_ZC>? prices { get; set; }
+        public double sort_rate { get; set; }
+        public double match_rate { get; set; }
+        public double price_rate { get; set; }
+
         //public int user_id { get; set; } = 0;
         //public long query_id { get; set; } = 0;
     }
 
-    public record class Products_List_From_Barcode_ZC(long query_id, int user_id, List<Product_From_Barcode_ZC> products, string error="");
+    public record class Products_List_From_Barcode_ZC(long query_id, int user_id, bool isRequestComleted, List<Product_From_Barcode_ZC> products, string error="");
 
     public class Price_ZC
     {
@@ -505,6 +512,8 @@ namespace SB_Parser_API.Models
         public string? retailer_logo_url { get; set; }
         public string? retailer_mini_logo_url { get; set; }
         public int? store { get; set; }
+        public double? lat { get; set; }
+        public double? lon { get; set; }
         public long? product_id { get; set; }
         public long? product_sku { get; set; }
         public double? price { get; set; }
@@ -531,5 +540,53 @@ namespace SB_Parser_API.Models
     {
         public QueryType id { get; set; }
         public string? type { get; set; }
+    }
+
+    [JsonConverter(typeof(JsonPathConverter))]
+    public class Multi_Search_Result
+    {
+        public string id { get; set; } = "";
+        public int store_id { get; set; }
+        public string name { get; set; } = "";
+        public double min_order_amount { get; set; }
+        public double min_order_amount_pickup { get; set; }
+        public double min_first_order_amount { get; set; }
+        public double min_first_order_amount_pickup { get; set; }
+        public string delivery_forecast_text { get; set; } = "";
+        public bool on_demand { get; set; }
+        public bool express_delivery { get; set; }
+        public double minimum_order_amount { get; set; }
+        public double minimum_order_amount_pickup { get; set; }
+        public bool is_planned_delivery_available { get; set; }
+        //public List<ClosestShippingOption> closest_shipping_options { get; set; }
+        //public List<ShippingMethod> shipping_methods { get; set; }
+        [JsonProperty("retailer.id")]
+        public int retailer_id { get; set; }
+    }
+    public class ActiveRequest
+    {
+        public long? query_id { get; set; }
+        public int? user_id { get; set; }
+        public string? user_name { get; set; }
+        public string? user_phone { get; set; }
+        public string? user_email { get; set; }
+        public string? query { get; set; }
+        public string? barcode { get; set; }
+        public double? lat { get; set; }
+        public double? lon { get; set; }
+        public double? radius { get; set; } // km
+        public int? take { get; set; }
+
+        //__ For internal use
+        public ZC_User? user { get; set; }
+        public string? action { get; set; }
+        public string? controller { get; set; }
+    }
+    public record ProductName
+    {
+        public long Id { get; set; }
+        public string name { get; set; } = "";
+        public string namepp { get; set; } = "";
+        public int rate { get; set; }
     }
 }

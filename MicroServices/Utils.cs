@@ -1,5 +1,7 @@
 ﻿using System.Text.RegularExpressions;
 using System.Web;
+using SB_Parser_API.Models;
+using static SB_Parser_API.MicroServices.SearchViaBarcode;
 
 namespace SB_Parser_API.MicroServices
 {
@@ -149,5 +151,334 @@ namespace SB_Parser_API.MicroServices
             }
             return ("");
         }
+
+        /*
+	Набор программ для нечёткого сравнения похожести строк. 
+
+Варианты использование:
+
+Вариант 1. Как раньше медленно, но точнее
+	int res = CompResultFine(string st1, string st2);
+
+Вариант 2. Быстрый, с предварительным отсевом
+	int res = CompResultFast(string st1, string st2);
+
+Вариант 3. Ещё Быстрее, для сравнения с предустановленным образцом и предварительным отсевом	
+	SetSample(string st1); // установка образца
+	int res = CompResultSample(string st2); // сравнение с предустановленым образцом
+
+
+	Набор программ для формирования отсортированных по рейтингу массивов с результатами.
+
+Использование
+
+		void InitResArrays(int len);  
+			Инициализирует массивы для хранения лучших результатов 
+			len - количество лучших значений, которые надо отобрать и отсортировать по рейтингу.
+
+		Boolean TryInsertCurrentResult(int res,int ind)
+			Пытается вставить текущую строку в топ лист. Если подошла - вернёт true, если нет - false
+			res - рейтинг строки, ind - ID (или индекс строки)
+
+	        int[] GetResultArrayRating()
+			Возвращает отсортированный массив рейтингов
+
+	        int[] GetResultArrayIndex()
+			Возвращает отсортированный массив индексов по рейтингу
+*/
+
+        //___________________________________________________________________
+        static int[] BRB_res= { };
+        static int[] BRB_ind= { };
+        static int res_pr;
+        static Object insertLock = new Object();
+
+        static public void InitResArrays(int len)
+        {
+            BRB_res = new int[len];
+            BRB_ind = new int[len];
+            res_pr = 0;
+        }
+
+        static public Boolean TryInsertCurrentResult(int res, int ind)
+        {
+            int i, j, len, restmp, indtmp;
+
+            lock (insertLock)
+            {
+                if (res > res_pr)
+                {
+                    BRB_res[0] = res;
+                    BRB_ind[0] = ind;
+                    len = BRB_res.Length;
+                    for (i = 0; i < len; i++)
+                    {
+                        for (j = i; j < len; j++)
+                        {
+                            if (BRB_res[i] > BRB_res[j])
+                            {
+                                restmp = BRB_res[i];
+                                BRB_res[i] = BRB_res[j];
+                                BRB_res[j] = restmp;
+                                indtmp = BRB_ind[i];
+                                BRB_ind[i] = BRB_ind[j];
+                                BRB_ind[j] = indtmp;
+                            }
+                        }
+                    }
+                    res_pr = BRB_res[0];
+                    return (true);
+                }
+                return (false);
+            }
+        }
+        static public int[] GetResultArrayRating()
+        {
+            return (BRB_res);
+        }
+        static public int[] GetResultArrayIndex()
+        {
+            return (BRB_ind);
+        }
+
+
+        //___________________________________________________________________
+        public class FindRelevantNames
+        {
+            public List<ProductName> TopNames = new();
+            public ProductName minRateItem = null!;
+            public static string[] sfcWords = { };
+            public static string sampleFC = "";
+            public static int topResultCount = 30;
+            public void SetSample(string st, int? trc)
+            {
+                topResultCount = trc ?? topResultCount;
+                st = PreProcessString(st);
+                sfcWords = st.Split(' ').Where(x => x.Length > 2).ToArray(); // строка в слова
+                sampleFC = st;
+            }
+            public void FindBestProductNames(ProductName pn)
+            {
+                var curRate = CompResultSample(sampleFC, pn.namepp, sfcWords);
+                int minRate;
+                lock (TopNames)
+                {
+                    if (TopNames.Count < topResultCount)
+                    {
+                        pn.rate = curRate;
+                        TopNames.Add(pn);
+                        minRate = TopNames.Select(x => x.rate).Min();
+                        minRateItem = TopNames.FirstOrDefault(x => x.rate == minRate)!;
+                        return;
+                    }
+                    if (curRate > minRateItem.rate)
+                    {
+                        TopNames.Remove(minRateItem);
+                        pn.rate = curRate;
+                        TopNames.Add(pn);
+                        minRate = TopNames.Select(x => x.rate).Min();
+                        minRateItem = TopNames.FirstOrDefault(x => x.rate == minRate)!;
+                    }
+                }
+            }
+        }
+
+        //___________________________________________________________________
+        static string[] SFCWords = { };
+        static string SampleFC="";
+
+        static public string PreProcessString(string st)
+        {
+            while (st.Length != (st = st.Replace("  ", " ")).Length) ; // Подавление лишних пробелов.
+            st = st.ToLower();
+            st = st.Replace("ё", "е"); // Подавление ё.
+            st = st.Replace(",", "."); // Подавление разницы между ',' и '.'.
+            return (st);
+        }
+        static public int CompResultFast(string st1, string st2)
+        {
+            string SampleFCSafe, st0;
+            string[] SFCWordsSafe;
+            int l0, l1, l2, res;
+
+            SampleFCSafe = SampleFC;
+            SFCWordsSafe = SFCWords;
+
+            l1 = st1.Length;
+            l2 = st2.Length;
+            if (l1 > l2)
+            {
+                st0 = st1;
+                l0 = l1;
+                st1 = st2;
+                l1 = l2;
+                st2 = st0;
+                l2 = l0;
+            }
+            SetSample(st1);
+            res = CompResultSample(st2);
+            SampleFC = SampleFCSafe;
+            SFCWords = SFCWordsSafe;
+            return (res);
+
+        }
+        static public void SetSample(string st)
+        {
+            st = PreProcessString(st);
+            SFCWords = st.Split(' ').Where(x => x.Length > 2).ToArray(); // строка в слова
+            SampleFC = st;
+        }
+        static public int CompResultSample(string st2)
+        {
+            string st1;
+            int sw;
+
+            //st2 = PreProcessString(st2);
+
+            sw = 0;
+            st1 = SampleFC;
+            foreach (string sts in SFCWords)
+            {
+                if (st2.Contains(sts)) //IndexOf ((sts.Length > 2) && (st2.Length >= sts.Length ? st2.Contains(sts) : sts.Contains(st2))) //IndexOf
+                {
+                    sw = 1;
+                    break;
+                }
+            }
+            if (sw == 0)
+                return (0);
+            return (CompResultSys(st1, st2));
+        }
+        static public int CompResultSample(string st1, string st2, string[] sfcw)
+        {
+            int sw;
+            //st2 = PreProcessString(st2);
+            sw = 0;
+            foreach (string sts in sfcw)
+            {
+                if (st2.Contains(sts)) //IndexOf ((sts.Length > 2) && (st2.Length >= sts.Length ? st2.Contains(sts) : sts.Contains(st2))) //IndexOf
+                {
+                    sw = 1;
+                    break;
+                }
+            }
+            if (sw == 0)
+                return (0);
+            return (CompResultSys(st1, st2));
+        }
+        static public int CompResultFine(string st1, string st2)
+        {
+            st1 = PreProcessString(st1);
+            st2 = PreProcessString(st2);
+            return (CompResultSys(st1, st2));
+        }
+        static int CompResultSys(string st1, string st2)
+        {
+            string st0;
+            int i, j, k1, k2, l0, l1, l2, lmin, lminc, lm, lmm, mltot, ml, mp, mc, mpp, mlp;
+
+            lmin = 3;
+            l1 = st1.Length;
+            l2 = st2.Length;
+            if (l1 > l2)
+            {
+                st0 = st1;
+                l0 = l1;
+                st1 = st2;
+                l1 = l2;
+                st2 = st0;
+                l2 = l0;
+            }
+            if (l1 < lmin) lmin = l1;
+            if (l1 == 0)
+            {
+                if (l2 == 0)
+                    return (10100);
+                else
+                    return (0);
+            }
+            mpp = 0;
+            mlp = 0;
+            for (i = 0, mp = 0, ml = 0, mc = 0, mltot = 0; i <= l1 - lmin; i++)
+            {
+                for (j = 0, lmm = 0, lminc = lmin; j <= l2 - lminc; j++)
+                {
+                    for (k1 = i, k2 = j, lm = 0; (k1 < l1) && (k2 < l2); k1++, k2++)
+                    {
+                        if (st1[k1] == st2[k2])
+                            lm++;
+                        else
+                            break;
+                    }
+
+                    if (lm > lmm)
+                        lmm = lm;
+                    if (lminc < lmm)
+                        lminc = lmm;
+                }
+                if (lmm < lmin)
+                    continue;
+                mc++;
+                mltot += lmm;
+                if (mp + ml > i)
+                {
+                    if (i + lmm > mp + ml)
+                    {
+                        if (mp > mpp)
+                        {
+                            mc--;
+                            mltot -= ml;
+                            mp = mpp;
+                            ml = mlp;
+                        }
+                    }
+                    else
+                    {
+                        mc--;
+                        mltot -= lmm;
+                        continue;
+                    }
+                    if (lmm > ml)
+                    {
+                        mltot -= ml;
+                        if (i - mp < lmin)
+                            mc--;
+                        else
+                            mltot += i - mp;
+                        mp = i;
+                        mpp = i;
+                        ml = lmm;
+                        mlp = lmm;
+                    }
+                    else
+                    {
+                        if (i + lmm - mp - ml < lmin)
+                        {
+                            mc--;
+                            mltot -= lmm;
+                        }
+                        else
+                        {
+                            mltot -= mp + ml - i;
+                            mp += ml;
+                            ml = i + lmm - mp;
+                        }
+                    }
+                }
+                else
+                {
+                    mp = i;
+                    ml = lmm;
+                    mpp = i;
+                    mlp = lmm;
+                }
+            }
+            if (mltot > 0)
+                return ((mltot * 100 / l1) * 100 + 140 - mc * 8 - l2 * 32 / l1);
+            else
+                return (0);
+        }
     }
 }
+    
+

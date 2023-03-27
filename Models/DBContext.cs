@@ -25,6 +25,7 @@ namespace SB_Parser_API.Models
         public DbSet<SB_image_product> ImProds => Set<SB_image_product>();
         public DbSet<SB_barcode_product> BarProds => Set<SB_barcode_product>();
         public DbSet<Price_SB_V2> Prices => Set<Price_SB_V2>();
+        public DbSet<Price_SB_V2> Prices_Archive => Set<Price_SB_V2>();
         public DbSet<ZC_User> Users => Set<ZC_User>();
         public DbSet<Query_ZC> Queries => Set<Query_ZC>();
         public DbSet<Query_Type_ZC> QueryTypes => Set<Query_Type_ZC>();
@@ -136,6 +137,12 @@ namespace SB_Parser_API.Models
             modelBuilder.Entity<Price_SB_V2>(entity =>
             {
                 entity.ToTable("SB_Prices");
+                entity.HasKey(e => e.id);
+                entity.Property(e => e.id).ValueGeneratedNever();
+            });
+            modelBuilder.Entity<Price_SB_V2>(entity =>
+            {
+                entity.ToTable("SB_Prices_Archive");
                 entity.HasKey(e => e.id);
                 entity.Property(e => e.id).ValueGeneratedNever();
             });

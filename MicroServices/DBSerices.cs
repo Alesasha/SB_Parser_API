@@ -7,12 +7,16 @@ using System.Collections.Generic;
 using System.Linq;
 using static SB_Parser_API.MicroServices.DBSerices;
 using AngleSharp.Dom;
+using static SB_Parser_API.MicroServices.SearchViaBarcode;
+using AngleSharp.Common;
 //using System.Data.Entity;
 
 namespace SB_Parser_API.MicroServices
 {
     public static class DBSerices
     {
+        public static List<ProductName> productNames { get; set; } = new();
+
         public enum DBParam : int
         {
             TotalPriceScanners = 2, HideMyNameProxy = 11
@@ -278,7 +282,31 @@ namespace SB_Parser_API.MicroServices
         }
 
         static int totProd = 0;
+        static Dictionary<long, Product_SB_V2>? sProducts;
+        static Dictionary<(long,int), Price_SB_V2>? sPrices;
+        static Dictionary<string, int>? sBarcodes;
+        static Dictionary<long, List<SB_barcode_product>>? sBarProds;
+        static Dictionary<string, int>? sImages;
+        static Dictionary<long, List<SB_image_product>>? sImProds;
 
+        public static bool Init_AddOrUpdateProductsBatch()
+        {
+            if (GetDBName(typeof(Product_SB_V2)) != "PISB" || GetDBName(typeof(Price_SB_V2)) != "PISB" || GetDBName(typeof(SB_Barcode)) != "PISB" || 
+                GetDBName(typeof(SB_barcode_product)) != "PISB" || GetDBName(typeof(SB_Image)) != "PISB" || GetDBName(typeof(SB_image_product)) != "PISB")
+                return false;
+
+            var db = new PISBContext();
+
+            sProducts = db.Products.AsNoTracking().ToDictionary(x=>x.sku ?? 0);
+            sPrices = db.Prices.AsNoTracking().ToDictionary(x => ((x.product_sku ?? 0), (x.retailer ?? 0)));
+            sBarcodes = db.Barcodes.AsNoTracking().ToDictionary(x => x.barcode ?? "", x=>x.id);
+            sImages = db.Images.AsNoTracking().ToDictionary(x =>x.url, x => x.id);
+            sBarProds = db.BarProds.AsNoTracking().ToLookup(x=>x.product_sku).ToDictionary(x=>x.Key,x=>x.ToList());
+            sImProds = db.ImProds.AsNoTracking().ToLookup(x => x.product_sku).ToDictionary(x => x.Key, x => x.ToList());
+
+
+            return true;
+        }
         public static bool AddOrUpdateProductsBatch(List<Product_SB_V2>? prodBatch, bool saveAllAtOnce = false)
         {
             if ((prodBatch is null) || (prodBatch.Count <= 0))
@@ -293,6 +321,13 @@ namespace SB_Parser_API.MicroServices
             var imageProdIds = GetFreeIdList(db.ImProds.AsNoTracking().Select(x => x.id).ToList());
             var barcodeIds = GetFreeIdList(db.Barcodes.AsNoTracking().Select(x => x.id).ToList());
             var barcodeProdIds = GetFreeIdList(db.BarProds.AsNoTracking().Select(x => x.id).ToList());
+            
+            Dictionary<(long, long), SB_barcode_product> jgh = new();
+            
+
+
+
+
 
             List<Product_SB_V2> newProductList = new();
             List<Price_SB_V2> newPricesList = new();
@@ -336,19 +371,19 @@ namespace SB_Parser_API.MicroServices
                                 newProductList.Add(pr);
                             }
 
-                            while (!saveAllAtOnce)
-                            {
-                                try
-                                {
-                                    db.SaveChanges();
-                                    db.Dispose();
-                                    break;
-                                }
-                                catch (Exception e) { Console.WriteLine($"{nameof(AddOrUpdateProductsBatch)}: {e.Message}"); Task.Delay(3000).Wait(); continue; }
-                            }
+                            //while (!saveAllAtOnce)
+                            //{
+                            //    try
+                            //    {
+                            //        db.SaveChanges();
+                            //        db.Dispose();
+                            //        break;
+                            //    }
+                            //    catch (Exception e) { Console.WriteLine($"{nameof(AddOrUpdateProductsBatch)}: {e.Message}"); Task.Delay(3000).Wait(); continue; }
+                            //}
                         }
-                        if (saveAllAtOnce)
-                        {
+                        //if (saveAllAtOnce)
+                        //{
                             //--start-- Addition of the new Price
                             AddProductPrice(pr, db, priceIds, newPricesList);
                             //--end-- Addition of the new Price
@@ -358,21 +393,21 @@ namespace SB_Parser_API.MicroServices
                             //--start-- Addition new barcodes and links to them
                             AddProductBarcodes(pr, db, barcodeIds, barcodeProdIds, newBarcodeList, newBarcodeProductList);
                             //--end-- Addition new barcodes and links to them
-                        }
-                        else
-                        {
-                            //--start-- Addition of the new Price
-                            AddProductPrice(pr, db, priceIds, newPricesList);
-                            //--end-- Addition of the new Price
-                            //--start-- Addition new images and links to them
-                            AddProductImages(pr, db, imageIds, imageProdIds, newImageList, newImageProductList);
-                            //--end-- Addition new images and links to them
-                            //--start-- Addition new barcodes and links to them
-                            AddProductBarcodes(pr, db, barcodeIds, barcodeProdIds, newBarcodeList, newBarcodeProductList);
-                            //--end-- Addition new barcodes and links to them
-                        }
+                        //}
+                        //else
+                        //{
+                        //    //--start-- Addition of the new Price
+                        //    AddProductPrice(pr, db, priceIds, newPricesList);
+                        //    //--end-- Addition of the new Price
+                        //    //--start-- Addition new images and links to them
+                        //    AddProductImages(pr, db, imageIds, imageProdIds, newImageList, newImageProductList);
+                        //    //--end-- Addition new images and links to them
+                        //    //--start-- Addition new barcodes and links to them
+                        //    AddProductBarcodes(pr, db, barcodeIds, barcodeProdIds, newBarcodeList, newBarcodeProductList);
+                        //    //--end-- Addition new barcodes and links to them
+                        //}
                     }
-                    while (saveAllAtOnce)
+                    while (true) //saveAllAtOnce
                     {
                         lock (LSB_Products)
                         {
@@ -436,30 +471,30 @@ namespace SB_Parser_API.MicroServices
                         break;
                     if (psp[i - 1].price == pr.price)
                     {
-                        while (db.Prices.Local.Remove(psp[i - 1])) ;
-                        while (npl.Remove(psp[i - 1])) ;
+                        while (db.Prices.Local.Remove(psp[i - 1]));
+                        while (npl.Remove(psp[i - 1]));
                     }
                 }
                 db.Prices.Add(newPrice);
                 npl.Add(newPrice);
 
-                while (extDB is null)
-                {
-                    try
-                    {
-                        db.SaveChanges();
-                        break;
-                    }
-                    catch (Exception e) { Console.WriteLine($"{nameof(AddProductPrice)}: {e.Message}"); Task.Delay(3000).Wait(); continue; }
-                }
+                //while (extDB is null)
+                //{
+                //    try
+                //    {
+                //        db.SaveChanges();
+                //        break;
+                //    }
+                //    catch (Exception e) { Console.WriteLine($"{nameof(AddProductPrice)}: {e.Message}"); Task.Delay(3000).Wait(); continue; }
+                //}
             }
             //--end-- Addition of the new Price
             return true;
         }
         public static bool AddProductBarcodes(Product_SB_V2 pr, PISBContext extDB, List<int> barIds, List<int> barprIds, List<SB_Barcode> nbl, List<SB_barcode_product> nbpl)
         {
-            if (GetDBName(typeof(SB_Barcode)) != "PISB" || GetDBName(typeof(SB_image_product)) != "PISB")
-                return false;
+            //if (GetDBName(typeof(SB_Barcode)) != "PISB" || GetDBName(typeof(SB_image_product)) != "PISB")
+            //    return false;
 
             //--start-- Addition of the new Price
             lock (LSB_Barcodes) lock (LSB_barcode_product)
@@ -490,15 +525,15 @@ namespace SB_Parser_API.MicroServices
                                 nbpl.Add(nbp);
                             }
 
-                            while (extDB is null)
-                            {
-                                try
-                                {
-                                    db.SaveChanges();
-                                    break;
-                                }
-                                catch (Exception e) { Console.WriteLine($"{nameof(AddProductBarcodes)}/add/: {e.Message}"); Task.Delay(3000).Wait(); continue; }
-                            }
+                            //while (extDB is null)
+                            //{
+                            //    try
+                            //    {
+                            //        db.SaveChanges();
+                            //        break;
+                            //    }
+                            //    catch (Exception e) { Console.WriteLine($"{nameof(AddProductBarcodes)}/add/: {e.Message}"); Task.Delay(3000).Wait(); continue; }
+                            //}
                         }
                         //--end-- Addition new barcode and links to them
 
@@ -533,17 +568,17 @@ namespace SB_Parser_API.MicroServices
                                 addFreeIdsToList(barprIds, bpToDel.Select(x => x.id).ToList());
                             }
                         }
-                        while (extDB is null)
-                        {
-                            try
-                            {
-                                db.SaveChanges();
-                                break;
-                            }
-                            catch (Exception e) { Console.WriteLine($"{nameof(AddProductBarcodes)}/del/: {e.Message}"); Task.Delay(3000).Wait(); continue; }
-                        }
-                        //--end-- Deletion obsolete barcode and links to them
-                    }
+                        //while (extDB is null)
+                        //{
+                        //    try
+                        //    {
+                        //        db.SaveChanges();
+                        //        break;
+                        //    }
+                        //    catch (Exception e) { Console.WriteLine($"{nameof(AddProductBarcodes)}/del/: {e.Message}"); Task.Delay(3000).Wait(); continue; }
+                        //}
+                    //--end-- Deletion obsolete barcode and links to them
+                }
                 }
             return true;
         }
@@ -733,14 +768,51 @@ namespace SB_Parser_API.MicroServices
             var product = db.Products.FirstOrDefault(x => x.sku == sku);
             return product;
         }
+
+        public static Product_SB_V2? GetProductFromSKU(long sku)
+        {
+            if (GetDBName(typeof(Product_SB_V2)) != "PISB")
+                return null;
+            using var db = new PISBContext();
+            var product = db.Products.FirstOrDefault(x => x.sku == sku);
+            return product;
+        }
+
+        public record PriceWithInfo(Price_SB_V2 price, double lat, double lon, string? retailer_name, string? retailer_logo_image, string? retailer_mini_logo_image);
+        public static List<PriceWithInfo>? GetPricesFromSKU_WithRetailerAndStoreInfo(long sku)
+        {
+            if (GetDBName(typeof(Price_SB_V2)) != "PISB")
+                return null;
+            using var db = new PISBContext();
+            var prices = (from p in db.Prices.AsNoTracking().Where(x => x.product_sku == sku)
+                         join r in db.Retailers.AsNoTracking() on p.retailer equals r.id
+                         join s in db.Stores.AsNoTracking() on p.store equals s.id
+                         select new PriceWithInfo(p, s.lat, s.lon, r.name, r.logo_image, r.mini_logo_image)).ToList().OrderBy(x=>x.price.price).ToList();
+            return prices;
+        }
+        public static List<string>? GetBarcodesFromSKU(long sku)
+        {
+            if (GetDBName(typeof(SB_Barcode)) != "PISB")
+                return null;
+            using var db = new PISBContext();
+            var barcodes = db.BarProds.AsNoTracking().Where(x => x.product_sku == sku).Join(db.Barcodes,bp=>bp.barcode_id,b=>b.id,(bp,b)=> b.barcode).ToList();
+            return barcodes;
+        }
         public static List<Price_SB_V2>? GetPricesFromSKU(long sku)
         {
             if (GetDBName(typeof(Price_SB_V2)) != "PISB")
                 return null;
             using var db = new PISBContext();
-
-            var prices = db.Prices.AsNoTracking().Where(x => x.product_sku == sku).OrderBy(x=>x.price).ToList();
+            var prices = db.Prices.AsNoTracking().Where(x => x.product_sku == sku).OrderBy(x => x.price).ToList();
             return prices;
+        }
+        public static List<ProductName>? GetProductNamesForSearch()
+        {
+            if (GetDBName(typeof(Product_SB_V2)) != "PISB")
+                return null;
+            using var db = new PISBContext();
+            var names = db.Products.Select(x => new ProductName() { Id = x.sku ?? 0, name = x.name ?? "", namepp = PreProcessString(x.name ?? "") }).ToList();
+            return names;
         }
         public static List<string>? GetImagesFromSKU(long sku)
         {

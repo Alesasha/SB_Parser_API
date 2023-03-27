@@ -18,6 +18,13 @@ using System.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using RandomUserAgent;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+using Elastic.Clients.Elasticsearch;
+using Elastic.Transport;
+using Elastic.Clients.Elasticsearch.QueryDsl;
+using System.Reflection.PortableExecutable;
+using static System.Net.Mime.MediaTypeNames;
+using Azure;
+using AngleSharp.Dom;
 
 //using System.Web.Mvc;
 //using System.Data.Objects.ObjectQuery;
@@ -26,19 +33,109 @@ namespace SB_Parser_API.MicroServices
 {
     public static class SearchViaBarcode
     {
-        public static async Task GetShops(double lat, double lon, double radius)
+        // Using C# 9 record to define our book DTO
+        public class Book
         {
-            List<Store> storesWithinRadius=null!;
+            public int Id { get; set; }
+            public string Title { get; set; } = "";
+            public string ISBN { get; set; } = "";
+            public string ISbnm { get; set; } = "";
+        }
+
+        public static async Task GetShops(double lat, double lon, double radius)  // radius in km
+        {
+            List<Store> storesWithinRadius = null!;
             using (var db = new PISBContext())
             {
                 var stores = db.Stores.ToList();
-                storesWithinRadius = stores.Where(x => (x.distanceToMyPoint=CalcDistance(lat, lon, x.lat, x.lon)) <= radius).ToList();
+                storesWithinRadius = stores.Where(x => (x.distanceToMyPoint = CalcDistance(lat, lon, x.lat, x.lon)) <= radius).ToList();
                 storesWithinRadius = storesWithinRadius.OrderBy(x => x.distanceToMyPoint).ToList();
             }
             var len = storesWithinRadius.Where(x => x.name!.Contains("ЛЕНТА")).ToList();
             //return;
 
-              HttpClient client = new HttpClient();
+            //List<ProductName> pNames = new();
+            using (var db = new PISBContext())
+                productNames = db.Products.Select(x => new ProductName() { Id = x.sku ?? 0, name = x.name ?? "", namepp = PreProcessString(x.name ?? "") }).ToList();
+
+            var selNames = productNames.Where(x => x.name.Contains("молоко") || x.name.Contains("3,2%") || x.name.Contains("пастериз")).ToList(); //, StringComparison.InvariantCultureIgnoreCase
+
+            //InitResArrays(20);
+
+            var frn = new FindRelevantNames();
+            frn.SetSample("Молоко красная цена пастеризованное ", 100); //3.2% пастериз 0.9 л
+            Parallel.ForEach(productNames, frn.FindBestProductNames);
+            frn.TopNames =frn.TopNames.OrderByDescending(x => x.rate).ToList();
+
+
+            // defaults to localhost:9200
+
+            var settings = new ElasticsearchClientSettings(new Uri("https://localhost:9200"))
+            .CertificateFingerprint("9077f351f40d4c34793b7979292f42c60dd33db5bd611edbf489883534fcf390")
+            .Authentication(new BasicAuthentication("elastic", "Wj5C4ZVaxFveRpOdXUy*"));
+
+            var clientSSL = new ElasticsearchClient(settings);
+
+            var uri = new Uri("http://elastic:Wj5C4ZVaxFveRpOdXUy*@localhost:9200");
+            //var settings = new ConnectionConfiguration(uri);
+            var clientEL = new ElasticsearchClient(uri);
+
+            var json = "{\"Id\":1,\"Title\":\"Pro .NET Memory Management\",\"ISBN\":\"9781484240267\",\"ISbnm\":\"9781484240267\"}";
+            var b1 = JsonConvert.DeserializeObject<Book>(json) ?? new() { Id = 1, Title = "Pro .NET Memory Manage", ISBN = "978148424026711" }; //978-1-4842-4026-71
+
+            // index a document from a JSON string, creating an index with auto-mapped properties
+
+            var indexResponse = await clientEL.IndexAsync<Book>(b1, "books");
+
+            if (indexResponse.IsValidResponse)
+            {
+                await Task.Delay(10);
+                var searchResponseg = await clientEL.GetAsync<Book>("books", b1.Id.ToString());
+                // after a short delay, try to search for a book with a specific ISBN
+                var searchResponse = await clientEL.SearchAsync<Book>(s => s.Index("books").Query(q => q.Match(m=>m.Field<string>(f=>f.ISbnm).Query("9781484240267"))));// .Field(f => f.ISBN).Query("9781484240267"))));  //.Term((t => t.ISBN), "9781484240267"))); ; //.QueryString(q => q.Query("9781484240267")))); ;   //.Term(t => t.ISBN, "9781484240267"))); ;  //From(0).Size(1000)
+
+                var requestEL = new SearchRequest("books")
+                {
+                    Query = new TermQuery("ISBN") { Value = "9781484240267" }
+                };
+
+                var responseEL = await clientEL.SearchAsync<Book>(requestEL);
+
+                if (searchResponse.IsValidResponse)
+                {
+                    Console.WriteLine($"Найдено всего: {searchResponse.Documents.Count}");
+                    searchResponse.Documents.ToList().ForEach(x => Console.WriteLine($"Id={x.Id},Title={x.Title},ISBN={x.ISBN}"));
+                    Console.WriteLine();
+                }
+            }
+
+            var bookToIndex = new Book() { Id=2, Title="Pro .NET Benchmarking", ISBN="978-1-4842-4940-6" };
+
+            // index another book, this time serializing an object
+            indexResponse = await clientEL.IndexAsync<Book>(bookToIndex, "books");
+
+            if (indexResponse.IsValidResponse)
+            {
+                await Task.Delay(10);
+
+                // after a short delay, get the book back by its ID
+                //var searchResponse = await clientEL.GetAsync<DynamicResponse>("books", bookToIndex.Id.ToString());
+                var searchResponse = await clientEL.GetAsync<Book>("books", bookToIndex.Id.ToString());
+
+                if (searchResponse.IsValidResponse)
+                {
+                    // access the title by path notation from the dynamic response
+                    Console.WriteLine($"Title: {searchResponse?.Source?.Title}");
+                }
+            }
+
+            // clean up by removing the index
+            await clientEL.Indices.DeleteAsync("books"); //.DeleteAsync<VoidResponse>("books");
+
+            // Using C# 9 record to define our book DTO
+
+
+            HttpClient client = new HttpClient();
             //https://sbermarket.ru/api/retailers
             //https://sbermarket.ru/auchan/search?keywords=4607161622308&sid=245
             //https://sbermarket.ru/api/stores/245/products/slivki-prostokvashino-pitievye-ul-trapasterizovannye-10-bzmzh-350-ml-eed21be
@@ -50,7 +147,7 @@ namespace SB_Parser_API.MicroServices
             var request = new HttpRequestMessage()
             {
                 RequestUri = rUri,
-                Method = HttpMethod.Get,
+                Method = System.Net.Http.HttpMethod.Get,
             };
             request.Headers.Add("api-version", "3.0");
             request.Headers.Add("client-token", "7ba97b6f4049436dab90c789f946ee2f");
@@ -92,7 +189,7 @@ namespace SB_Parser_API.MicroServices
             request = new HttpRequestMessage()
             {
                 RequestUri = rUri,
-                Method = HttpMethod.Get,
+                Method = System.Net.Http.HttpMethod.Get,
             };
             //request.Headers.Add("api-version", "3.0");
             //request.Headers.Add("client-token", "7ba97b6f4049436dab90c789f946ee2f");
@@ -135,7 +232,7 @@ namespace SB_Parser_API.MicroServices
                 request = new HttpRequestMessage()
                 {
                     RequestUri = new Uri(ch_url),
-                    Method = HttpMethod.Post,
+                    Method = System.Net.Http.HttpMethod.Post,
                 };
                 request.Headers.Add("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36");
                 request.Headers.Add("cookie", sc2);
