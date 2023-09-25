@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using static SB_Parser_API.MicroServices.Utils;
@@ -25,7 +26,7 @@ namespace SB_Parser_API.Models
         public DbSet<SB_image_product> ImProds => Set<SB_image_product>();
         public DbSet<SB_barcode_product> BarProds => Set<SB_barcode_product>();
         public DbSet<Price_SB_V2> Prices => Set<Price_SB_V2>();
-        public DbSet<Price_SB_V2> Prices_Archive => Set<Price_SB_V2>();
+        public DbSet<Price_SB_V2_Archive> Prices_Archive => Set<Price_SB_V2_Archive>();
         public DbSet<ZC_User> Users => Set<ZC_User>();
         public DbSet<Query_ZC> Queries => Set<Query_ZC>();
         public DbSet<Query_Type_ZC> QueryTypes => Set<Query_Type_ZC>();
@@ -38,6 +39,7 @@ namespace SB_Parser_API.Models
             options => options.EnableRetryOnFailure());
             optionsBuilder.EnableSensitiveDataLogging();
             optionsBuilder.LogTo(System.Console.WriteLine, LogLevel.Error);
+            //this.Database.SetCommandTimeout(Get_DB_CommandTimeOut());
         }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -61,7 +63,7 @@ namespace SB_Parser_API.Models
                 entity.Property(e => e.seo_category).HasMaxLength(30);
                 entity.Property(e => e.short_name).HasMaxLength(100);
                 entity.Property(e => e.side_image).HasMaxLength(1024);
-                entity.Property(e => e.slug).HasMaxLength(50);
+                entity.Property(e => e.slug).HasMaxLength(100);
             });
 
             modelBuilder.Entity<Store>(entity =>
@@ -105,7 +107,7 @@ namespace SB_Parser_API.Models
                 entity.Property(e => e.id).ValueGeneratedNever();
                 entity.Property(e => e.name).HasMaxLength(100);
                 entity.Property(e => e.presentation).HasMaxLength(100);
-                entity.Property(e => e.value).HasMaxLength(2000);
+                //entity.Property(e => e.value).HasMaxLength(4000);
             });
 
             modelBuilder.Entity<SB_Image>(entity =>
@@ -140,7 +142,7 @@ namespace SB_Parser_API.Models
                 entity.HasKey(e => e.id);
                 entity.Property(e => e.id).ValueGeneratedNever();
             });
-            modelBuilder.Entity<Price_SB_V2>(entity =>
+            modelBuilder.Entity<Price_SB_V2_Archive>(entity =>
             {
                 entity.ToTable("SB_Prices_Archive");
                 entity.HasKey(e => e.id);
@@ -167,6 +169,7 @@ namespace SB_Parser_API.Models
                 entity.Property(e => e.id).ValueGeneratedNever();
                 entity.Property(e => e.type).HasMaxLength(50);
             });
+            this.Database.SetCommandTimeout(Get_DB_CommandTimeOut());
         }
     }
     public class PIPContext : DbContext
@@ -181,6 +184,7 @@ namespace SB_Parser_API.Models
         public PIPContext() => Database.EnsureCreated();
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
+            //this.Database.SetCommandTimeout(Get_DB_CommandTimeOut());
             if (!optionsBuilder.IsConfigured)
             {
                 optionsBuilder.UseSqlServer(Get_DB_ConnectionString("PIP"),
@@ -260,6 +264,7 @@ namespace SB_Parser_API.Models
                 //entity.Ignore(e => e.getParametr);
                 //entity.Ignore(e => e.setParametr);
             });
+            this.Database.SetCommandTimeout(Get_DB_CommandTimeOut());
 
             //OnModelCreatingPartial(modelBuilder);
         }

@@ -9,8 +9,9 @@
     }
   },
   "ConnectionStrings": {
-    "PIDB": "Data Source=192.168.1.200;Initial Catalog=PIDB;User ID=sa;Password=asdgh125As;Connection Timeout=720;TrustServerCertificate=true;" //192.168.1.251
+    "PIDB": "Data Source=192.168.1.251;Initial Catalog=PIDB;User ID=sa;Password=asdgh125As;Connection Timeout=720;TrustServerCertificate=true;" //192.168.1.251
   },
+  "Get_DB_CommandTimeOut": 180,
   "profiles": {
     "SB_Parser_API": {
       "commandName": "Project",

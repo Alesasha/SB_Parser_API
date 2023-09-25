@@ -129,7 +129,7 @@ namespace SB_Parser_API.Controllers
         }
 
         [HttpGet("{query_id:long?}")]
-        public string Get(string barcode = "", int user_id = 0, long query_id = 0, double lat = 0, double lon = 0, double radius = 0)
+        public string Get(string barcode = "", int user_id = 0, long query_id = 0, double lat = 0, double lon = 0, double radius = 0, bool properties = true)
         {
             //return ($"bar={barcode},user_id={user_id},query_id={query_id}");
             var context = Response.HttpContext;
@@ -165,7 +165,7 @@ namespace SB_Parser_API.Controllers
         }
 
         [HttpGet("{query_id:long?}")]
-        public string Get(string query = "", int user_id = 0, long query_id = 0, double lat=0, double lon = 0, double radius = 0)
+        public string Get(string query = "", int user_id = 0, long query_id = 0, double lat=0, double lon = 0, double radius = 0, bool properties=true)
         {
             //return ($"bar={barcode},user_id={user_id},query_id={query_id}");
             var context = Response.HttpContext;
@@ -188,6 +188,43 @@ namespace SB_Parser_API.Controllers
             var products = productInfoListFromTextQuery(currentRequest);
 
             return JsonConvert.SerializeObject(products);
+        }
+    }
+
+    [ApiController]
+    [Route("api/table/BarCodeRequest")]
+    public class BarCodeRequestTableController : ControllerBase
+    {
+        private readonly ILogger<BarCodeRequestTableController> _logger;
+
+        public BarCodeRequestTableController(ILogger<BarCodeRequestTableController> logger)
+        {
+            _logger = logger;
+        }
+
+        [HttpGet("{query_id:long?}")]
+        public string Get(string barcode = "", int user_id = 0, long query_id = 0, double lat = 0, double lon = 0, double radius = 0, bool properties = true)
+        {
+            //return ($"bar={barcode},user_id={user_id},query_id={query_id}");
+            var context = Response.HttpContext;
+            foreach (var o in Request.RouteValues)
+            {
+                Debug.WriteLine($"{o.Key}, {o.Value}");
+                Console.WriteLine($"{o.Key}, {o.Value}");
+            }
+            foreach (var o in Request.Query)
+            {
+                Debug.WriteLine($"{o.Key}, {o.Value}");
+                Console.WriteLine($"{o.Key}, {o.Value}");
+            }
+
+            var currentRequest = CreateActiveRequest(Request, Response);
+
+            //HttpClient client = new HttpClient();
+            var products = productInfoListFromBarcode(currentRequest);
+            var table = convert_PLFB_to_table(products);
+
+            return JsonConvert.SerializeObject(table);
         }
     }
 

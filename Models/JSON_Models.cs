@@ -7,6 +7,9 @@ using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Drawing;
 using Azure;
+using static Elastic.Clients.Elasticsearch.JoinField;
+using static SB_Parser_API.MicroServices.Utils;
+using AngleSharp.Common;
 //using System.Configuration;
 //using Microsoft.Extensions.Configuration;
 
@@ -164,6 +167,9 @@ namespace SB_Parser_API.Models
     [JsonConverter(typeof(JsonPathConverter))]
     public class Store
     {
+        [NotMapped]
+        public bool point0 { get; set; } = false;
+
         public int id { get; set; }
         public string? uuid { get; set; }
         public string? name { get; set; }
@@ -223,6 +229,10 @@ namespace SB_Parser_API.Models
         [JsonProperty("city.id")]
         public int city_id { get; set; }
 
+        [NotMapped]
+        [JsonProperty("city_id")]
+        public int _city_id { get; set; }
+
         [JsonProperty("city.name")]
         public string? city_name { get; set; }
 
@@ -233,8 +243,16 @@ namespace SB_Parser_API.Models
         public DateTime? lpc_dt { get; set; }
     }
 
-    //[JsonConverter(typeof(JsonPathConverter))]
-    public class Category_SB_V2
+    [JsonConverter(typeof(JsonPathConverter))]
+    public class StoreSet_SB
+    {
+        public List<Store>? stores { get; set; }
+        [JsonProperty("meta.total_count")]
+        public int total_count { get; set; }
+    }
+
+        //[JsonConverter(typeof(JsonPathConverter))]
+        public class Category_SB_V2
     {
         public int id { get; set; }
         public string? type { get; set; }
@@ -307,6 +325,7 @@ namespace SB_Parser_API.Models
         public int? store { get; set; }
         public DateTime? dt_created { get; set; } = DateTime.Now;
         public DateTime? dt_updated { get; set; } = DateTime.Now;
+        public DateTime? dt_property_updated { get; set; } = DateTime.Now;
     }
     class Product_SB_V2_IdComparer : IEqualityComparer<Product_SB_V2>
     {
@@ -337,10 +356,10 @@ namespace SB_Parser_API.Models
         }
     }
 
-    public record Price_SB_V2
+    public record Price_SB_V2_Base
     {
-        [JsonProperty("notMapped")]
-        public int id { get; set; }
+        //[JsonProperty("notMapped")]
+        //public int id { get; set; }
         public DateTime? dt { get; set; }
         public DateTime? dt_created { get; set; }
         public int? retailer { get; set; }
@@ -358,6 +377,33 @@ namespace SB_Parser_API.Models
         public double stock { get; set; }
         public int update_counter { get; set; }
     }
+    public record Price_SB_V2 : Price_SB_V2_Base
+    {
+        [JsonProperty("notMapped")]
+        public int id { get; set; }
+    }
+
+    public record Price_SB_V2_Archive : Price_SB_V2_Base
+    {
+        [JsonProperty("notMapped")]
+        public int id { get; set; }
+        public Price_SB_V2_Archive() { }
+        public Price_SB_V2_Archive(Price_SB_V2 parent)
+        {
+            foreach (PropertyInfo prop in parent.GetType().GetProperties())
+                GetType()?.GetProperty(prop.Name)?.SetValue(this, prop.GetValue(parent, null), null);
+        }
+    }
+    //public record Price_SB_V2_Archive : Price_SB_V2 
+    //{
+    //    public Price_SB_V2_Archive() { }
+    //    public Price_SB_V2_Archive(Price_SB_V2 parent)
+    //    {
+    //        foreach (PropertyInfo prop in parent.GetType().GetProperties())
+    //            GetType()?.GetProperty(prop.Name)?.SetValue(this, prop.GetValue(parent, null), null);
+    //    }
+    //    //public new int id { get; set; }
+    //}
 
     public class Meta_Products_SB_V2
     {
@@ -501,10 +547,60 @@ namespace SB_Parser_API.Models
         //public int user_id { get; set; } = 0;
         //public long query_id { get; set; } = 0;
     }
+    class Product_From_Barcode_ZC_Comparer : IEqualityComparer<Product_From_Barcode_ZC>
+    {
+        // Products are equal if their names and product numbers are equal.
+        public bool Equals(Product_From_Barcode_ZC? x, Product_From_Barcode_ZC? y)
+        {
+            //Check whether the compared objects reference the same data.
+            if (Object.ReferenceEquals(x, y)) return true;
+            //Check whether any of the compared objects is null.
+            if (x is null || y is null) 
+                return false;
+            //Check whether the products are equal.
+            if(!(x.barcodes ?? new()).Intersect(y.barcodes ?? new()).Any())
+                return false;
+            if(x.grams_per_unit !=y.grams_per_unit)
+                return false;
+            if (CompResultFast(x.name ?? "xxxx", y.name ?? "yyyy") < 8000)
+                return false;
+            /*
+            JsonConvert.DeserializeObject(x.properties?.FirstOrDefault(x => x.name == "main_taxon")?.value ?? "{'main_taxon':'none'}").ToDictionary().TryGetValue("name",out var xCat);
+            JsonConvert.DeserializeObject(y.properties?.FirstOrDefault(x => x.name == "main_taxon")?.value ?? "{'main_taxon':'none'}").ToDictionary().TryGetValue("name", out var yCat);
+            if ((xCat ?? "null") != (yCat ?? "null"))
+                return false;
+            */
 
-    public record class Products_List_From_Barcode_ZC(long query_id, int user_id, bool isRequestComleted, List<Product_From_Barcode_ZC> products, string error="");
+            return true;   //x.protocol == y.protocol && x.ip == y.ip && x.port == y.port;
+        }
 
-    public class Price_ZC
+        // If Equals() returns true for a pair of objects
+        // then GetHashCode() must return the same value for these objects.
+
+        public int GetHashCode(Product_From_Barcode_ZC p)
+        {
+            //Check whether the object is null
+            if (Object.ReferenceEquals(p, null)) return 0;
+
+            //Get hash code for the protocol field if it is not null.
+            //int hashProductProtocol = ptd.protocol == null ? 0 : ptd.protocol.GetHashCode();
+
+            //Get hash code for the ip field.
+            //int hashProductIp = ptd.ip == null ? 0 : ptd.ip.GetHashCode();
+
+            //Get hash code for the port field.
+            //int hashProductPort = ptd.port == null ? 0 : ptd.port.GetHashCode();
+
+            //Calculate the hash code for the product.
+            return p.grams_per_unit == null ? 0 : p.grams_per_unit.GetHashCode(); //hashProductProtocol ^ hashProductIp ^ hashProductPort;
+        }
+    }
+
+
+    public record class Products_List_From_Barcode_ZC(long query_id, int user_id, bool isRequestCompleted, List<Product_From_Barcode_ZC> products, string error="");
+    public record class Products_List_From_Barcode_Table_ZC(long query_id, int user_id, bool isRequestCompleted, List<string> Columns, List<List<object>> Rows, string error = "");
+
+    public record class Price_ZC
     {
         public DateTime? dt { get; set; }
         public int? retailer { get; set; }
@@ -514,6 +610,7 @@ namespace SB_Parser_API.Models
         public int? store { get; set; }
         public double? lat { get; set; }
         public double? lon { get; set; }
+        public string? address { get; set; }
         public long? product_id { get; set; }
         public long? product_sku { get; set; }
         public double? price { get; set; }
@@ -523,6 +620,11 @@ namespace SB_Parser_API.Models
         public double? unit_price { get; set; }
         public double? original_unit_price { get; set; }
         public double stock { get; set; }
+        public double? distanceToMyPoint { get; set; }
+        public bool is_flagman { get; set; } = false;
+        public bool is_local { get; set; } = false;
+        public bool is_just_updated { get; set; } = false;
+
     }
     public class Query_ZC
     {
@@ -576,6 +678,8 @@ namespace SB_Parser_API.Models
         public double? lon { get; set; }
         public double? radius { get; set; } // km
         public int? take { get; set; }
+        public bool? properties { get; set; }
+
 
         //__ For internal use
         public ZC_User? user { get; set; }

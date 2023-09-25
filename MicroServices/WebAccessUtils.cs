@@ -27,6 +27,15 @@ using AngleSharp.Common;
 using System.Net.Mime;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using System.Xml.Linq;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+using OpenQA.Selenium;
+using OpenQA.Selenium.Chrome;
+using Proxy = SB_Parser_API.Models.Proxy;
+using ProxyS = OpenQA.Selenium.Proxy;
+using Microsoft.AspNetCore.Hosting.Server;
+using static System.Net.WebRequestMethods;
+using OpenQA.Selenium.DevTools;
+using OpenQA.Selenium.Chromium;
 
 namespace SB_Parser_API.MicroServices
 {
@@ -48,6 +57,202 @@ namespace SB_Parser_API.MicroServices
     {
         public static string curCT = $"WebAccessUtils";
         //thisProcess = Process.GetCurrentProcess();
+
+        public static void RunProxyServer() //async HttpListener server
+        {
+            Console.WriteLine("Hello from Proxy");
+            ProxyServer.Server.DumpHeaders = true;
+            ProxyServer.Server.DumpPostData = true;
+            ProxyServer.Server.DumpResponseData = true;
+
+            if(ProxyServer.Server.Start())
+                Console.WriteLine("Server started.");
+
+
+            /*
+                        while (true)
+                        {
+                            Console.WriteLine("Hello1 from Proxy");
+                            var context =  server.GetContext();
+                            Console.WriteLine("Hello2 from Proxy");
+
+                            var request = context.Request;  // получаем данные запроса
+                            var response = context.Response;    // получаем объект для установки ответа
+                            var user = context.User;        // получаем данные пользователя
+                            Console.WriteLine($"Получен запрос {request.HttpMethod} {request.Url}");
+
+                            Console.WriteLine($"reqURL={request.Url}");
+
+                            HttpClient httpClient = new HttpClient();
+
+                            var reqUrl = request.Url?.ToString().Replace(":8888", "") ?? "";
+                            var rUri = new Uri(reqUrl);
+                            // Прямо передаем пришедший HTTP-запрос
+                            HttpRequestMessage targetRequest = new HttpRequestMessage(new HttpMethod(request.HttpMethod), rUri);
+
+                            // Копируем заголовки и тело запроса
+                            string?[] array = (request.Headers.AllKeys ?? new string[] { });
+                            for (int i = 0; i < array.Length; i++)
+                            {
+                                if(array[i]!.Contains("Proxy") || array[i]!.Contains("Lenght"))
+                                    continue;
+                                string headerName = array[i]!;
+                                targetRequest.Headers.Add(headerName, request.Headers.Get(headerName));
+                            }
+
+                            using (Stream bodyStream = request.InputStream)
+                            {
+                                byte[] requestBodyBytes = new byte[request.ContentLength64];
+                                await bodyStream.ReadAsync(requestBodyBytes, 0, requestBodyBytes.Length);
+                                targetRequest.Content = new ByteArrayContent(requestBodyBytes);
+                            }
+
+                            var targetResponse = await httpClient.SendAsync(targetRequest);
+                            targetResponse ??= new();
+
+                            // Отправляем ответ от целевого сервера клиенту
+                            response.StatusCode = (int)targetResponse.StatusCode;
+                            response.ContentType = targetResponse?.Content.Headers?.ContentType?.ToString() ?? "";
+                            byte[] responseData = await targetResponse!.Content.ReadAsByteArrayAsync();
+                            response.ContentLength64 = responseData.Length;
+                            response.OutputStream.Write(responseData, 0, responseData.Length);
+                            response.Close();
+                        }
+
+                        server.Stop(); // останавливаем сервер
+                        server.Close(); // закрываем HttpListener
+             */
+        }
+
+        public static string GetCookieFromSelenium(string proxy, string userAgent)
+        {
+
+            HttpListener server = new HttpListener();
+            // установка адресов прослушки
+            /*
+            server.Prefixes.Add("http://127.0.0.1:8888/");
+            server.Start(); // начинаем прослушивать входящие подключения
+            Console.WriteLine("Proxy server is started");
+            */
+            RunProxyServer();
+            //Console.ReadKey();
+            //var proxyTask = Task.Factory.StartNew(() => RunProxyServer(server), TaskCreationOptions.LongRunning);
+
+            //Task.Delay(5000).Wait();
+            ChromeOptions options = new ChromeOptions();
+            //options.AddArguments("--proxy-server=http://127.0.0.1:8888");
+            options.AddArgument("--user-agent=Mozilla/7.0 (iPad; CPU OS 66_0 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/6.0 Mobile/10A5355d Safari/8536.25");
+            //options.AddArgument("--proxy-server=http://45.189.252.57:999");
+            //options.AddArgument("headless");
+            options.AddArgument("--disable-blink-features");
+            options.AddArgument("--disable-blink-features=AutomationControlled");
+            options.AddArgument("--enable-automation=false");
+            options.UseWebSocketUrl = true;
+            options.AddAdditionalOption("useAutomationExtension", false);
+            var capabilities = options.ToCapabilities();
+
+            var driver = new ChromeDriver(options);
+
+            //driver.ExecuteAsyncScript("");
+            //driver.Url = "http://zakazportretov.ru"; //sbermarket.ru
+            // Настройки прокси
+            string proxyIP = "101.51.169.208";
+            string proxyPort = "8080";
+
+            // JavaScript-скрипт для смены прокси
+            string jsScript = $@"
+var config = {{
+  mode: ""fixed_servers"",
+  rules: {{
+    singleProxy: {{
+      scheme: ""http"",
+      host: ""{proxyIP}"",
+      port: {proxyPort}
+    }},
+    bypassList: []
+  }}
+}};
+chrome.proxy.settings.set({{value: config, scope: ""regular""}}, function() {{}});
+";
+
+            // Выполните JavaScript-скрипт
+            //IJavaScriptExecutor jsExecutor = (IJavaScriptExecutor)driver;
+            //jsExecutor.ExecuteScript(jsScript);
+
+            driver.ExecuteCdpCommand("Network.setUserAgentOverride", new() { { "userAgent", "Mozilla/10.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.53 Safari/537.36" } });
+
+            // Настройки прокси
+            var proxyConfig = new Dictionary<string, object>
+            {
+                { "type", "manual" },
+                //{ "httpProxy", "your_proxy" },
+                //{ "httpsProxy", "your_proxy" },
+                //{ "sslProxy", "your_proxy" },
+                //{ "ftpProxy", "your_proxy" },
+                { "socksProxy", "socks4://182.52.63.95:4153" },
+                { "noProxy", "" }
+            };
+
+            var devTools = driver as IDevTools;
+            var session = devTools.GetDevToolsSession();
+
+            // Отправляем команду Network.enable для включения сетевых событий
+            //session.Send(Network.Enable());
+            // Настройки прокси
+            var proxyConfig1 = """" 
+            {
+                Type = "manual",
+                SocksProxy = "socks4://182.52.63.95:4153",
+                NoProxy = ""
+            }
+            """";
+            //session.SendCommand(ChromeDriver.SendChromeCommandWithResult,"SetProxyOverride(proxyConfig1)");
+
+            // Отправляем команду CDP для изменения настроек прокси
+            //var ce = driver.CommandExecutor;
+
+            //ce.Execute(ChromiumDriver.ExecuteCdp);
+
+            //driver.ExecuteCdpCommand("chrome.proxy.settings.set", proxyConfig);
+            //driver.ExecuteCdpCommand("Network.setProxyOverride", proxyConfig);
+
+            //var proxySettings = driver.ExecuteCdpCommand("Network.getProxySettings", new());
+            Task.Delay(2000).Wait();
+            driver.Navigate().GoToUrl("https://sbermarket.ru/api/v2/products?q=&sid=9595&tid=&page=11&per_page=25&sort=popularity"); //sbermarket.ru/api/v2/products?q=&sid=9595&tid=&page=23&per_page=25&sort=popularity http://go.com/  "https://sbermarket.ru/api/v2/products?q=&sid=9595&tid=&page=1&per_page=23&sort=popularity"
+            Task.Delay(5000).Wait();
+            var element = driver.FindElement(By.TagName("pre"));
+            var innerHtml1 = element.GetAttribute("innerHTML");
+
+            driver.SwitchTo().NewWindow(WindowType.Tab);
+            driver.Navigate().GoToUrl("https://sbermarket.ru/api/v2/products?q=&sid=9595&tid=&page=11&per_page=25&sort=popularity");
+
+            Task.Delay(5000).Wait();
+            driver.SwitchTo().Window(driver.WindowHandles.First());
+
+            //driver.ExecuteScript(jsScript);
+
+            var spid = driver.Manage().Cookies.GetCookieNamed("spid")?.Value;
+            var spsc = driver.Manage().Cookies.GetCookieNamed("spsc")?.Value;
+            var spca = driver.Manage().Cookies.GetCookieNamed("spca")?.Value;
+            var page_source = driver.PageSource;
+             element = driver.FindElement(By.TagName("pre"));
+            var innerHtml2 = element.GetAttribute("innerHTML");
+            var ch_Window = driver.Manage().Window;
+            var agent = driver.ExecuteScript("return navigator.userAgent");
+            //driver.Capabilities.
+            //driver.Close();
+            var rt =IPAddress.Loopback;
+
+            driver.Quit();
+            return "";
+            driver.FindElement(By.XPath(@".//div[@id='search-3']/form/input[@id='s']")).SendKeys("c#");
+            driver.FindElement(By.XPath(@".//input[@id='searchsubmit']")).Click();
+            Thread.Sleep(3000);
+            var links = driver.FindElements(By.XPath(".//h2/a"));
+            foreach (IWebElement link in links)
+                Console.WriteLine("{0} - {1}", link.Text, link.GetAttribute("href"));
+            return "";
+        }
         public static string GetWebInfoSysOld(Func<HttpRequestMessage> requestGenerator, string proxy, int tOut = defaultTimeOut)
         {
             HttpResponseMessage response = null!;
@@ -860,7 +1065,7 @@ namespace SB_Parser_API.MicroServices
             Proxy_to_Domain? goodProxy = null;
             for (var h = 0; true; h++)
             {
-                uri = @"https://hidemy.name/ru/proxy-list/?anon=234";// "http://hidemy.name/ru/proxy-list/?anon=234"; https://sbermarket.ru/api/stores/20
+                uri = @"https://hidemyna.me/ru/proxy-list/?anon=234";// "http://hidemy.name/ru/proxy-list/?anon=234"; https://sbermarket.ru/api/stores/20
                 if (h > 0)
                     uri += $"&start={h * 64}";
                 str = "";
@@ -874,14 +1079,30 @@ namespace SB_Parser_API.MicroServices
                     wro.proxy = goodProxy is null ? wro.proxy : goodProxy;
                     wro.contentKeys.Add("class=country");
                     wro.priority = Priority.Low;
-                    wro.attempts = 100;
+                    wro.needUserAgent = false;
+                    wro.method = HttpMethod.Get;
+                    //var stringContent = new StringContent(JsonConvert.SerializeObject("""md=eInoQSZXrdBfzCAjWyLF.ZlfzKiFMWXZ7SU8hgDffS0-1688559957-0-AWYd9AK8PT3ArzyDgYIddJVZswrDw8vqjhVWGxk4ycNYwQld0FlTLWocfTMC35XIWXzPu1YT7IB9GDC_pUepqTXZRwBF78c9ZtaOwIhdFc18RvodNJOVnV0nLeYPTK77GASJdIE-wZAjTeoizXyORhsg2JR87zi9rK3evkcNPrF_4exQQu-DkOvrgqnFWWYgyuXLLjs7hETz2vLmWPJOX5sX2rQajuz-aBKdhWmuzQL6MEkAMr81kRpapjpo40SBi5PK0aF1JdYPkVufSwqq4oreHENIRFAhCVEqa4S3w9yNsfBeAWDK7d9NF6wJpZRsxyw68IsqZenWNRtRxfqslLSsdykvA4pSH0deC1vkE2i-gIlWCGXmIfAoEBGoO3EM0uxkQaDobNzjiMa6vAfUIOdAYvVWukNS9-e_OfWTapjV24s58WlUEzxGgKHavMLv8XHDYAnpav0EH_ZPLnZLBfXXWfcDl5kl7jD62rmwYqeQRl4g7sGX3P-AFBExcXhBVq4ChINNxuiIAc-79WqRPVMGJQmnO-6J5zZtWu6wImW_a9kCNLDUBjNfy_y5s-VGwCsoJ-5f7GSilLH-QQAH_kpWGU78kL9wtDjl8s4-rx7ClqP0BLVBRVGOusrPKFDZjzLnzisyIB8SIUeNS4b7Zxm6GHG-E1Ud0eC9kirJHJZPhGBHlnC7CINLZh76Hm5YfgCZnojfxYvvhCFQY4DYdlTG0NOgBBA2KoKXrGJebE0GrJMgS-0uFEdQW4wL6GuzRTgWTqoRbmimFFrp4MSiOTLzt8OqE0Pyr58liwguMBYWf0bO_uo6XlhmKc4OveEd2XJzeFuFL_ROM26a9lvIXzDTdRu0JG6s7gJR4GYyCfYB5buq-6ULKkHGW4kxyR31stUCA2FIwwNcF8LoYihNFULWiYN6bsx5AGK4XC0W810kK4q-FKr0FJi0x-UKGeKaVySWfp72NviffbNQAjjmsLL71UIYeX4OsVL3IIlAGgUhY624dWejQA2b-gDJ_ynhV03umdmlfLGPqppQpQX8S7XxyDfE8v6ZUqYVi7-373PJPkJrCBt_qe4DikKDEhtUcvNj8Gpx78YNq6p_tVlYrD0YfGAHszjzKa0rpdlizkAcj4TESzcD1inE4c6_PBG9Yv7DqSxbt8OGQ5ibZJpM8IPY0gMtV3u3rzKgZ5B-il0YV36bqVfr-UIBfW6knnG7GcNLE-86E_rRKo8T8h3S1lbfN6kMTrhbuVJPRIo1OxTTq2uYerpsJkh-ZTlXnYow64maeHCtmPz9pAQWrssL0GlpFdjY6Xy6KgAz2ACyw-vA0_1x3qmnr_-jIFMYE9b6FqIU_AFFxssdFVlMwb6LMpTRoFOTXo-EU3Df3GGRwbWfbArm8g7zLnuG4UFkond6oRBE-TeCfEgPJmiNMh-Bg5netluBBnV9QgzIJC63iYjzd2imM5WU24s1BC1T68FvRpgazzCUxY37sSZNAk6a-GLO55u5oyy6hOdMnf1QKsdfo7ao2OfRNlPX1keiOujnzx4BqpT4R_dB6HPWfclSjzA_BpkNKy_0QboBNE_TZ2TVVyZQos-Ad3erGnlOrAxE48sR-EQUc84s7PNIzW-Mdqoqjs7OSwJJNKeQsu-DAftUsCM1c-A5mTUPCR8gxZCnihfDJXAUWCUZ0dE3-wzNNt8jIsopG6W1q6I2yVRCp9QYHUZV-m0kjuLQXKLJ-dO8FCYXOoUiEKlRBySU3W-RtnrkyMHF_fWTrUi3P15wQiSIEoiUKEEYU5-TcNK7iiL2CLukRKv9hHQdI0NIPWjiE4mZE9dyX5hQ5Ujgo9EeTZHiTkpJoCvgAMgJHN-q_fJHHtrzPzD5JHvKDrKOfJieM9cnZivWg6Hb9qSQtPc4Ic9kdWLko1bQxYFa0AA3imCJWhH0XZ9dCp9w9JtYcWF4eVr3CN_C_bkqP1ZnJ9QgJWm4KZWGIeS36k2soZ8kmEHbqxBrHwt44rGPit3pqac-KylrYcP5bP-08_PX_ESg8GyyTHJ5pcwaaYzORkEPStgFtXwI0GPu0CHic29tuEPaZZFBt5t4ifLrT8pNpJJfaJEuFlTIZtrCUUEbyGu_b4FLQEWCiVxn0kjrAhAqdsoWjguRpb0p8rJ1kXHzwN2TUoca6HP6yBsQodZ9fmiEOl9uGjlmHZ0iA_gH6KIwU9ilgJrbTow7X8pHHwuB6jVfY7rxyB-YG9O0WvPL6AlcYpE6j8LZIM1s7CvqQglCwoMXOO7p0tKMmqgvCldceHGCaaNP1uXKrqiqKz3AkuAb2-3LQ3E-vQEgExspc7hyhlYQNZBirRYZDDadalf8dn0pVSuf37umed1fgA3J2eDAs385qrp2yP_9d4vBVPaSojoYxKp9HtftN3nr55mg53394U-5teKU98ww7pjKJ7A1WygX1HVZhdVojUZDG7lL6HGVnE9RMC-lE8heosMTT7n_7Vin3EdDYKmcSoCLF-aQ6dAbjAP2w3OfObTxPq4sZVb5PuBGuDhA-i0mXCsKMuWCoV9HtuVISfoEOTTh6nP93CATwj50y3uinDEQLsURiOX6bsJJeGXJk3yk2sOpXcCVMccJRYv7fmLr6NdWrokKtKPh45vaX0-Le7l0nX3dI0soOdQMMlgjLzk-vznjFjJszCwnvIt2cxYYSqt7UQlQ9oo6CswxoO8JnRA2ZkCLFhRAjUdSVcTrQh-S_CbdYeI8itWkQLKg-gdnHL7X1xNLIGJvrhWBz6njhXaWCXzMasyOcFJ2x0f2JiRjzmp6d4sLCpKZZE1RzFYZEmf-MpYdhpFovqxalgwFgZJI4MgMOQC60PnS-b9a9rVu7g-xJ4wJNvn0D2583Uhec7wv9zRMuV_ch6tvtGTktM_JhtwVFhIpOsXTCP5z5UoqXKKdxfSRMBTJcd5iG5W7avLn4JWHrEc-h6t8e0kcJ0UVn4abfPO9bi-a8wDhotPnR26CxM5EUTYWY7v4kg0LfjsI6_5POHplHEwL7SyETGhkGaSpXcJ1dcatZA7pk1IbFhBnv4kD1FBkB-SQlXwXc3GgQMgUR7tFJjvCYr0_fD2zImIfcH0Po7b6QOUqIWxrmWzKkBCdLcC2u9O-FlU33NGnSpRiADVng6g-W6tBdo1yniuSSSYAsopl2p1QCMtRcxOFoE2NYXWSd_-3VVxT0OlrAvMhtKzFbovcuZswhpfjIuUDsEHvMJM&sh=d687c3300dfcee271db3893c4c6d8974&aw=UHPUTETaAsUM-1-7e1f97f6482b1628"""), Encoding.UTF8, "application/json");
+                    //wro.content = stringContent;
+                    wro.needProxy = true;
+                    wro.headers.Add(new RequestHeader() { key = "User-Agent", value = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36" });
+                    //wro.headers.Add(new RequestHeader() { key = "Referer", value = "https://hidemy.name/ru/proxy-list/?anon=234&start=64&__cf_chl_tk=n.aMgNR.7sr7kc6.pCc1qrZdGlz9F8vADVHacGjTcRY-1688559957-0-gaNycGzNDNA" });
+                    //wro.headers.Add(new RequestHeader() { key = "Cookie", value = "PAPVisitorId=a1cbe1c89dcec6dae37d3f38a38ckJ4k; _ym_uid=168867836723066523; _ym_d=1688678367; _tt_enable_cookie=1; _ttp=CWajkhyojFxP1H9ixqIBTPSVV6X; _gid=GA1.2.1722204398.1688678368; _fbp=fb.1.1688678368096.1730104395; _ym_isad=2; _ga=GA1.1.1078954233.1688678367; _ga_KD5MHSSLTF=GS1.2.1688678368.1.1.1688678900.20.0.0; _ga_KJFZ3PJZP3=GS1.1.1688678367.1.1.1688678907.0.0.0" });
+
                     /*
-                    wro.proxy.ip = "51.158.169.52";
-                    wro.proxy.port = "29976";
-                    wro.proxy.protocol = "HTTP";
-                    wro.proxy.domain = "https://hidemy.name";
+                    wro.headers.Add(new() { key = "cookie", value = "cf_chl_2=cb4b7e23889a115"});
+                    wro.headers.Add(new() { key = "user-agent", value = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36" });
+                    wro.needUserAgent = false;   
+                    wro.needProxy = false;
+                    wro.proxy.ip = "";//"51.158.169.52";
+                    wro.proxy.port = "";//"29976";
+                    wro.proxy.protocol = "";//"HTTP";
+                    wro.proxy.domain = "";//"https://hidemy.name";
                     */
+
+                    wro.attempts = 1;
+
                     GetWebInfo(wro);
+                    
                     if (wro.requestDone)
                     {
                         try { str = wro.textResponse(); } catch { }
@@ -1387,7 +1608,7 @@ namespace SB_Parser_API.MicroServices
             delInc(@"https://kdveri24.ru", "kdveri24", 1000);
             delInc(@"https://sbermarket.ru/api/stores/26", "store", 4000);
             delInc(@"https://igooods.ru", "igooods", 2000);
-            delInc(@"https://hidemy.name/ru/proxy-list/", "class=country", 1000);
+            delInc(@"https://hidemyna.me/ru/proxy-list/", "class=country", 1000);
             delInc(@"https://d9ae6ad5-3627-4bf2-85a7-22bbd5549e94.selcdn.net/uploads/picture/picture/463837/mini_143958_120210122-10871-8ndfpp.jpg", "7CCCC20D0F705B1D816B26F9B9CCFCFF", 1000);
 
             //delInc(@"https://igstatic-a.akamaihd.net/uploads/picture/picture/100035/mini_4860009311561.JPG", "Gusarova_Anastasiya", 1000);

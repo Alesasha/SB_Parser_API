@@ -16,6 +16,8 @@ using System.Data.Entity.Migrations;
 using static SB_Parser_API.MicroServices.Utils;
 using static SB_Parser_API.MicroServices.WebAccessUtils;
 using static SB_Parser_API.MicroServices.DBSerices;
+using static SB_Parser_API.MicroServices.SB_API;
+using static SB_Parser_API.MicroServices.ZC_API;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using RandomUserAgent;
@@ -23,6 +25,9 @@ using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 using static System.Net.Mime.MediaTypeNames;
 using static System.Runtime.InteropServices.JavaScript.JSType;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Elastic.Clients.Elasticsearch.Tasks;
+using System.Threading;
 
 namespace SB_Parser_API.MicroServices
 {
@@ -30,6 +35,14 @@ namespace SB_Parser_API.MicroServices
     {
         public record class groupedStores(int retailer_id, int maxProductCount, int storesCount);
         public static Stopwatch? SP_Timer = null;
+        public const int productUpdatePeriod = 5; // hours
+        public const int productPropertyUpdateThreads = 40; // pcs
+        public const int maxScanThreads = 40;
+        public static List<ProductPageScanTaskInfo> pageScanTasksList = null!;
+        public static List<StoreProductsToDB_TaskInfo> storeProductsToDB_TasksList = null!;
+        public static Task? WriteDB_Task = null;
+        public static List<Product_SB_V2>? product_to_db_list = new();
+
         public static void CollectProducts()
         {
             /*
@@ -52,18 +65,79 @@ namespace SB_Parser_API.MicroServices
             };
             cats.ForEach(x => taxonCount(x));
             */
-
+            Init_AddOrUpdateProductsBatch();
             SP_Timer = new();
             SP_Timer.Start();
-            var storesList = StoresGet().Where(x => x.last_product_count > 0 && x.active == true && x.city_id == 28).ToList();
+            var storesList = MosRegStoresGet();
             var groupStores = storesList.GroupBy(p => p.retailer_id).Select(g => new groupedStores(g.Key, 
             (int)g.Max(x => x.last_product_count)!, (int)g.Count())).OrderByDescending(x => x.maxProductCount).ToList();
+
+            pageScanTasksList = new();
+            storeProductsToDB_TasksList = new();
+
+            product_to_db_list = new();
 
             for (int reti = 0; reti < groupStores.Count; reti++)
             {
                 var gsi = groupStores[reti];
                 var curStore = storesList.FirstOrDefault(x => x.retailer_id == gsi.retailer_id && x.last_product_count >= gsi.maxProductCount) ?? new();
+
+                lock(storeProductsToDB_TasksList)
+                    storeProductsToDB_TasksList.Add(new StoreProductsToDB_TaskInfo() { store = curStore.id, retailer = curStore.retailer_id, product = new() });
+
                 CollectStoreProducts(curStore);
+                if(WriteDB_Task is null || WriteDB_Task.IsCompleted || WriteDB_Task.IsFaulted || WriteDB_Task.IsCanceled)
+                    WriteDB_Task= Task.Factory.StartNew(() => WriteStoreProdutsToDB(), TaskCreationOptions.LongRunning);
+            }
+            
+            while (pageScanTasksList.Count > 0)
+            {
+                ProductPageScanTaskInfo? taskInfo;
+                while ((taskInfo = pageScanTasksList.FirstOrDefault(x => x.isJobDone)) is null)
+                {
+                    if (reqQC!.IsCompleted || reqQC.IsFaulted || reqQC.IsCanceled)
+                        reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning);
+                    Task.Delay(1000).Wait();
+                }
+                ProcessPageScanResult(taskInfo);
+                taskInfo.command = CMD.Exit;
+                taskInfo.checkCommand.Set();
+                pageScanTasksList.Remove(taskInfo);
+            }
+
+            lock(storeProductsToDB_TasksList)
+                storeProductsToDB_TasksList.ForEach(x => { x.isAllPageRequestStarted = true;x.isAllPageRequestDone = true; });
+
+            while (storeProductsToDB_TasksList.Count > 0)
+            {
+                if (WriteDB_Task is null || WriteDB_Task.IsCompleted || WriteDB_Task.IsFaulted || WriteDB_Task.IsCanceled)
+                    WriteDB_Task = Task.Factory.StartNew(() => WriteStoreProdutsToDB(), TaskCreationOptions.LongRunning);
+
+                var pPerH = TimeSpan.FromHours(1) * prodCount / SP_Timer!.Elapsed;
+                Console.WriteLine($"TotalStores={groupStores.Count},StoresToSave={storeProductsToDB_TasksList.Count},TotalProducts={prodCount},Speed={(int)pPerH:d4}_pph,FromStart:{SP_Timer.Elapsed:hh\\:mm\\:ss}"); //:mm\\:ss\\"); product.count=>{taskInfo.product?.Count ?? 0},
+                Task.Delay (15000).Wait();
+            }
+        }
+
+        public static void WriteStoreProdutsToDB()
+        {
+            while (storeProductsToDB_TasksList.Count > 0)
+            {
+                StoreProductsToDB_TaskInfo? wdbt;
+                while ((wdbt=storeProductsToDB_TasksList.FirstOrDefault(x => x.isAllPageRequestDone)) is null)
+                {
+                    if (reqQC!.IsCompleted || reqQC.IsFaulted || reqQC.IsCanceled)
+                        reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning);
+                    Task.Delay(3000).Wait();
+                }
+                (product_to_db_list ??= new()).AddRange(wdbt.product);
+                if (product_to_db_list.Count > 10000 || storeProductsToDB_TasksList.Count < 2)
+                {
+                    AddOrUpdateProductsBatch(product_to_db_list);
+                    product_to_db_list.Clear();
+                }
+                lock (storeProductsToDB_TasksList)
+                    storeProductsToDB_TasksList.Remove(wdbt);
             }
         }
         public class ProductPageScanTaskInfo
@@ -73,7 +147,9 @@ namespace SB_Parser_API.MicroServices
             public int store;
             public int retailer;
             public int page;
+            public SortProductSB sort_order = SortProductSB.price_asc;
             public int total_pages=0;
+            public int total_count=0;
             public string cat = "";
             public List<Product_SB_V2>? product;
             public List<Price_SB_V2>? price;
@@ -81,6 +157,19 @@ namespace SB_Parser_API.MicroServices
             public CMD command = CMD.StandBy;
             public AutoResetEvent checkCommand = new(false);
             public bool isJobDone = false;
+        }
+        public class StoreProductsToDB_TaskInfo
+        {
+            //public Task? task = null;
+            //public int taskNumber;
+            public int store;
+            public int retailer;
+            public List<Product_SB_V2> product = new();
+            public bool isAllPageRequestStarted = false;
+            public bool isAllPageRequestDone = false;
+            //public CMD command = CMD.StandBy;
+            //public AutoResetEvent checkCommand = new(false);
+            //public bool isJobDone = false;
         }
         public static void ProductPageScanTaskExecutor(ProductPageScanTaskInfo IO_Block)
         {
@@ -101,9 +190,11 @@ namespace SB_Parser_API.MicroServices
                     if (IO_Block.command == CMD.ExecuteRequest)
                     {
                         IO_Block.isJobDone = false;
-                        (IO_Block.product, IO_Block.price, IO_Block.meta) = SB_API.productSearch("", IO_Block.cat, IO_Block.store, Priority.MediumLow, IO_Block.page, SB_API.productsPerPage);
+                        (IO_Block.product, IO_Block.price, IO_Block.meta) = SB_API.productSearch("", IO_Block.cat, IO_Block.store, Priority.MediumLow, IO_Block.page, SB_API.productsPerPage, IO_Block.sort_order);
                         IO_Block.product?.ForEach(x => { x.store = IO_Block.store; x.retailer = IO_Block.retailer; x.eans = BarCodeCheckList(x.eans); });
                         IO_Block.total_pages = IO_Block.meta?.total_pages ?? IO_Block.total_pages;
+                        IO_Block.total_count = IO_Block.meta?.total_count ?? IO_Block.total_count;
+
                         var maxPages = SB_API.maxProductsPerRequest / SB_API.productsPerPage;
                         IO_Block.total_pages = IO_Block.total_pages > maxPages ? maxPages : IO_Block.total_pages;
 
@@ -113,19 +204,20 @@ namespace SB_Parser_API.MicroServices
                         IO_Block.isJobDone = true;
                         continue;
                     }
-                    if (IO_Block.command == CMD.WriteDB)
+                    /*if (IO_Block.command == CMD.WriteDB)
                     {
                         if (IO_Block.product is null)
                         {
                             IO_Block.command = CMD.StandBy;
                             continue;
                         }
-                        AddOrUpdateProductsBatch(IO_Block.product,true);
+                        AddOrUpdateProductsBatch(IO_Block.product);
                         IO_Block.product = null;
                         IO_Block.command = CMD.StandBy;
                         IO_Block!.isJobDone = true;
                         continue;
                     }
+                    */
                 }
                 catch (Exception e)
                 {
@@ -135,68 +227,152 @@ namespace SB_Parser_API.MicroServices
                 }
             }
         }
-        record CTS(string id, int count);
-        public static ProductPageScanTaskInfo? dbTask = null;
+        public record CTS(string id, int count);
+        //public static ProductPageScanTaskInfo? dbTask = null;
         public static int prodCount=0;
 
+        public static void ProcessPageScanResult(ProductPageScanTaskInfo? taskInfo)
+        {
+            if (taskInfo?.product is not null && taskInfo.product.Count > 0)
+            {
+                StoreProductsToDB_TaskInfo? spt;
+                lock (storeProductsToDB_TasksList)
+                    spt = storeProductsToDB_TasksList.FirstOrDefault(x => x.store == taskInfo.store);
+                if (spt is null)
+                {
+                    spt = new() { store = taskInfo.store, retailer = taskInfo.retailer, product = new() };
+                    lock (storeProductsToDB_TasksList)
+                        storeProductsToDB_TasksList.Add(spt);
+                }
+                spt.product = spt.product.Union(taskInfo.product).Distinct(new Product_SB_V2_IdComparer()).ToList();
+
+                //var tp = prodCount + spt.product.Count;
+                int tp = 0;
+                int stc = 0;
+                lock (storeProductsToDB_TasksList)
+                    storeProductsToDB_TasksList.Where(x => x.isAllPageRequestStarted && !x.isAllPageRequestDone).ToList().ForEach(s => { //var storeOnScan = 
+                if ((stc=pageScanTasksList.Where(x => (x.store == s.store)).Count()) <= 0) // && !x.isJobDone
+                {
+                    Console.WriteLine($"Scan completed of store_id={s.store}, stc={stc}, productCount={s.product.Count()}");
+                    //Console.ReadKey();
+                    s.isAllPageRequestDone = true;
+                    prodCount += s.product.Count;
+                }
+            });
+                lock (storeProductsToDB_TasksList)
+                    storeProductsToDB_TasksList.Where(x => !x.isAllPageRequestDone).ToList().ForEach(s => { tp+= s.product.Count;});
+                tp += prodCount;
+
+                var pPerH = TimeSpan.FromHours(1) * tp / SP_Timer!.Elapsed;
+                Console.WriteLine($"store={taskInfo.store},cat={taskInfo.cat},page=>{taskInfo.page} of {taskInfo.total_pages},ProductsInShop={spt.product.Count},TotalProducts={tp},Speed={(int)pPerH:d4}_pph,FromStart:{SP_Timer.Elapsed:hh\\:mm\\:ss}"); //:mm\\:ss\\"); product.count=>{taskInfo.product?.Count ?? 0},
+
+                //taskInfo.store = 0;
+                //taskInfo.product = null;
+            }
+        }
+        public static void CollectCats(List<CTS> catsToScan, List<Category_SB_V2> catL)
+        {
+            foreach (var cat in catL)
+            {
+                if (cat.products_count > SB_API.maxProductsPerRequest && (cat.children?.Count ?? 0) > 0)
+                    CollectCats(catsToScan, cat.children!);
+                else
+                    catsToScan.Add(new(cat.id.ToString(), cat.products_count));
+            }
+        }
         public static void CollectStoreProducts(Store curStore)
         {
             var store_id = curStore.id;
             List<Category_SB_V2> curStoreCat;
             List<CTS> catsToScan = new();
-            if (curStore.last_product_count > 10000)
+            if (curStore.last_product_count > SB_API.maxProductsPerRequest)
             {
                 //return;
                 curStoreCat = SB_API.categoryGet(curStore.id)?.Where(x => x.id != 7107 && x.id != 57272 && x.id != 80857 && x.id != 82195).ToList() ?? new();
-                curStoreCat.ForEach(x => catsToScan.Add(new (x.id.ToString(),x.products_count)));
+                //curStoreCat.ForEach(x => catsToScan.Add(new (x.id.ToString(),x.products_count)));
+
+                CollectCats(catsToScan,curStoreCat);
+                //var ttcurStoreCat = curStoreCat;
+
             }
             else
-                catsToScan.Add(new("All", curStore.last_product_count ?? 0));
+              catsToScan.Add(new("All", curStore.last_product_count ?? 0));
 
-            const int maxScanThreads = 40;
-            List<ProductPageScanTaskInfo> tasksList = new();
+            //List<ProductPageScanTaskInfo> tasksList = new();
             List<Product_SB_V2> productBuff = new();
-            if (dbTask is not null)
-                tasksList.Add(dbTask);
+            //if (dbTask is not null)
+            //    tasksList.Add(dbTask);
 
-            dbTask = null;
+            //dbTask = null;
 
             var takeThread = () => 
             {
-                if (tasksList is null)
-                    tasksList = new();
+                if (pageScanTasksList is null)
+                    pageScanTasksList = new();
                 ProductPageScanTaskInfo? taskInfo;
-                while ((taskInfo = tasksList.FirstOrDefault(x => x.isJobDone)) is null)
+                while (true)
                 {
-                    if (tasksList.Count < maxScanThreads)
+                    while ((taskInfo = pageScanTasksList.FirstOrDefault(x => x.isJobDone)) is null)
                     {
-                        taskInfo = new ProductPageScanTaskInfo();
-                        taskInfo.task = Task.Factory.StartNew(() => ProductPageScanTaskExecutor(taskInfo), TaskCreationOptions.LongRunning);
-                        lock (tasksList)
+                        if (pageScanTasksList.Count < maxScanThreads)
                         {
-                            taskInfo.taskNumber = getIDforNewRecord(tasksList.Select(x => x.taskNumber).ToList());
-                            tasksList.Add(taskInfo);
+                            taskInfo = new ProductPageScanTaskInfo();
+                            taskInfo.task = Task.Factory.StartNew(() => ProductPageScanTaskExecutor(taskInfo), TaskCreationOptions.LongRunning);
+                            lock (pageScanTasksList)
+                            {
+                                taskInfo.taskNumber = getIDforNewRecord(pageScanTasksList.Select(x => x.taskNumber).ToList());
+                                pageScanTasksList.Add(taskInfo);
+                            }
+                            break;
                         }
-                        break;
+                        else
+                        {
+                            if (reqQC!.IsCompleted || reqQC.IsFaulted || reqQC.IsCanceled)
+                                reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning);
+                            Task.Delay(1000).Wait();
+                        }
                     }
-                    else
+                    //Console.WriteLine($"store={taskInfo.store},cat={taskInfo.cat},page=>{taskInfo.page} of {taskInfo.total_pages},product.count=>{taskInfo.product?.Count ?? 0}");
+                    if (taskInfo.isJobDone)
                     {
-                        if (reqQC!.IsCompleted || reqQC.IsFaulted || reqQC.IsCanceled)
-                            reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning);
-                        Task.Delay(1000).Wait();
-                    }
-                }
-                //Console.WriteLine($"store={taskInfo.store},cat={taskInfo.cat},page=>{taskInfo.page} of {taskInfo.total_pages},product.count=>{taskInfo.product?.Count ?? 0}");
-                if (taskInfo.isJobDone)
-                {
-                    if (taskInfo.product is not null && taskInfo.product.Count > 0)
-                    {
-                        productBuff = productBuff.Union(taskInfo.product).Distinct(new Product_SB_V2_IdComparer()).ToList();
-                        var tp = prodCount + productBuff.Count;
-                        var pPerH = TimeSpan.FromHours(1) * tp / SP_Timer!.Elapsed;
-                        Console.WriteLine($"store={taskInfo.store},cat={taskInfo.cat},page=>{taskInfo.page} of {taskInfo.total_pages},ProductsInShop={productBuff.Count},TotalProducts={tp},Speed={(int)pPerH:d4}_pph,FromStart:{SP_Timer.Elapsed:hh\\:mm\\:ss}"); //:mm\\:ss\\"); product.count=>{taskInfo.product?.Count ?? 0},
+                        if (taskInfo.product is not null && taskInfo.product.Count > 0)
+                        {
+                            ProcessPageScanResult(taskInfo);
+                            //productBuff = productBuff.Union(taskInfo.product).Distinct(new Product_SB_V2_IdComparer()).ToList();
+                            //var tp = prodCount + productBuff.Count;
+                            //var pPerH = TimeSpan.FromHours(1) * tp / SP_Timer!.Elapsed;
+                            //Console.WriteLine($"store={taskInfo.store},cat={taskInfo.cat},page=>{taskInfo.page} of {taskInfo.total_pages},ProductsInShop={productBuff.Count},TotalProducts={tp},Speed={(int)pPerH:d4}_pph,FromStart:{SP_Timer.Elapsed:hh\\:mm\\:ss}"); //:mm\\:ss\\"); product.count=>{taskInfo.product?.Count ?? 0},
+                            //taskInfo.product = null;
+                        }
+
+                        if (taskInfo.total_pages > taskInfo.page)
+                            taskInfo.page++;
+                        else
+                        {
+                            taskInfo.page = 1;
+                            if (taskInfo.total_pages * SB_API.productsPerPage < taskInfo.total_count)
+                            {
+                                var threshold = 1;
+                                if (taskInfo.total_count > SB_API.maxProductsPerRequest * 2)
+                                    threshold = 3;
+
+                                if ((int)taskInfo.sort_order < threshold)
+                                    taskInfo.sort_order++;
+                                else
+                                    break;
+                            }
+                            else
+                                break;
+                        }
                         taskInfo.product = null;
+                        taskInfo.meta = null;
+                        taskInfo.price = null;
+                        taskInfo.isJobDone = false;
+                        taskInfo.command = CMD.ExecuteRequest;
+                        taskInfo.checkCommand.Set();
+                        continue;
                     }
+                    break;
                 }
                 return taskInfo;
             };
@@ -208,30 +384,45 @@ namespace SB_Parser_API.MicroServices
                     var maxPages = SB_API.maxProductsPerRequest / SB_API.productsPerPage;
                     return pages > maxPages ? maxPages : pages;
                 };
-                for (int page = 1, totPages = pagesFromCount(cat.count, SB_API.productsPerPage); page <= totPages; page++)
-                {
+                //for (int page = 1, totPages = pagesFromCount(cat.count, SB_API.productsPerPage); page <= totPages; page++)
+
                     var ti = takeThread();
-                    if (ti.cat == cat.id)
-                        totPages = ti.total_pages;
-                    ti.total_pages = totPages;
+                    //if (ti.cat == cat.id)
+                      //  totPages = ti.total_pages;
+                    ti.total_pages = pagesFromCount(cat.count, SB_API.productsPerPage);
+                    ti.total_count = cat.count;
                     ti.store = store_id;
                     ti.retailer = curStore.retailer_id;
                     ti.cat = cat.id == "All" ? "" : cat.id;
-                    ti.page = page;
+                    ti.page = 1;
                     ti.product = null;
                     ti.meta = null;
                     ti.price = null;
                     ti.isJobDone = false;
                     ti.command = CMD.ExecuteRequest;
                     ti.checkCommand.Set();
-                }
             }
 
-            while (tasksList.FirstOrDefault(x => !x.isJobDone) is not null)
+            StoreProductsToDB_TaskInfo? cdbwt;
+            lock (storeProductsToDB_TasksList)
+                cdbwt = storeProductsToDB_TasksList.FirstOrDefault(x => x.store == curStore.id);
+            if (cdbwt is null)
+            {
+                cdbwt = new() { store = curStore.id, retailer = curStore.retailer_id, product = new() };
+                storeProductsToDB_TasksList.Add(cdbwt);
+            }
+            lock (storeProductsToDB_TasksList)
+                cdbwt.isAllPageRequestStarted = true;
+
+
+
+
+            /*
+            while (pageScanTasksList.FirstOrDefault(x => !x.isJobDone) is not null)
             {
                 if (reqQC!.IsCompleted || reqQC.IsFaulted || reqQC.IsCanceled)
                     reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning);
-                Task.Delay(3000).Wait();
+                Task.Delay(1000).Wait();
             }
             Console.WriteLine($"Scan of store={curStore.id} has done,TotalProducts={productBuff.Count}");
             prodCount += productBuff.Count;
@@ -247,8 +438,8 @@ namespace SB_Parser_API.MicroServices
             tiw.isJobDone = false;
             tiw.command = CMD.WriteDB;
             tiw.checkCommand.Set();
-            dbTask = tiw;
-
+            //dbTask = tiw;
+            */
             //while (tasksList.FirstOrDefault(x => !x.isJobDone) is not null)
               //  Task.Delay(3000).Wait();
             //Console.WriteLine($"Save all info of store={curStore.id} has done,TotalProducts={productBuff.Count}");
@@ -285,183 +476,167 @@ namespace SB_Parser_API.MicroServices
             return total_products;
         }
 
-        public static async Task CollectShops(string proxyURL, int smin, int smax, int numberOfTasks=30)
+        public static async Task CollectShops(int numberOfTasks=30)
         {
-            /*
-            HttpResponseMessage? response = null;
-            HttpRequestMessage? request = null;
-            var handler = new HttpClientHandler()
-            {
-                Proxy = new WebProxy(new Uri(proxyURL)), //$"HTTP://185.15.172.212:3128"
-                UseProxy = true
-            };
-
-            HttpClient client = new HttpClient(handler);
-            client.Timeout = TimeSpan.FromMilliseconds(40000);
-            */
-            //var db = new PISBContext();
-            //int imax = GetMaxStoreNumber() ?? 0;
-
-            int emptyLinks = 0;
             object el = new();
             var Timer = new Stopwatch();
 
             var store_batch = new List<Store>();
+            var store_source = new List<Store>();
+            object store_source_lock = new();
+            var store_DB = StoresGet();
+
             var saveStores = () =>
             {
-                while (true)
-                    if (AddOrUpdateStoresBatch(store_batch))
-                    {
-                        store_batch.Clear();
-                        break;
-                    }
-            };
-            /*
-            var getWebText = (string url) =>
-            {
-                string txt;
-                while (true)
+                var sb = new List<Store>();
+                lock (store_batch)
                 {
-                    try
-                    {
-                        request = new HttpRequestMessage()
-                        {
-                            RequestUri = new Uri(url),
-                            Method = HttpMethod.Get,
-                        };
-                        var respTask = client.SendAsync(request);
-                        respTask.Wait();
-                        response = respTask.Result;
-                        IEnumerable<string> cookies = response.Headers.SingleOrDefault(header => header.Key == "Set-Cookie").Value;
-                        txt = response.Content.ReadAsStringAsync().Result;
-                        break;
-                    }
-                    catch (Exception e) { Console.WriteLine($"Call Point 001: {e.Message}"); request?.Dispose(); Task.Delay(3000).Wait(); continue; }
+                    sb = store_batch.ToList();
+                    store_batch.Clear();
                 }
-                return txt;
+                while (!AddOrUpdateStoresBatch(sb))
+                        Task.Delay(1000).Wait();
             };
-            */
-            var getFullStoreInfo = (int st) =>
+
+            object pagesCountersLock = new();
+            int curPage = 1;
+            int totPages = 200;
+            int perPage = 500;
+            int totStores = totPages * perPage;
+
+            var collectStoreSourceList = () =>
             {
-                Store? sto = SB_API.storeInfoGet(st);
+                while (curPage <= totPages)
+                {
+                    StoreSet_SB? curStoreBatch = null;
+                    while(curStoreBatch is null)
+                        curStoreBatch = storeListInfoGet(curPage, perPage, Priority.High);
+                    lock (pagesCountersLock)
+                    {
+                        totStores = curStoreBatch.total_count;
+                        totPages = totStores / perPage + (totStores % perPage > 0 ? 1 : 0);
+                        curPage++;
+                    }
+                    lock (store_source_lock)
+                    {
+                        store_source.AddRange(curStoreBatch.stores ?? new());
+                        store_source = store_source.Distinct().OrderBy(x => x.id).ToList();
+                    }
+                }
+            };
+
+            var getFullStoreInfo = (Store? sto, int stoDone, bool getFullInfo) =>
+            {
+                var si = sto!.id;
+                if (getFullInfo)
+                    sto = SB_API.storeInfoGet(si);
                 if (sto is null)
                 {
-                    Console.WriteLine($"emptyLink:  {st}  emptyLinksInArow = {emptyLinks}");
-                    lock (el)
-                        emptyLinks++;
+                    Console.WriteLine($"emptyLink:  {si}  !!!!");
                     return;
                 }
-                if (sto is not null)
+                var lpc = GetProductCount(sto.id);
+                sto.last_product_count = lpc;//GetProductCount(sto.id);
+                sto.lpc_dt = DateTime.Now;
+
+                lock (store_batch)
                 {
-                    var lpc = GetProductCount(sto.id);
-                    sto.last_product_count = lpc;//GetProductCount(sto.id);
-                    sto.lpc_dt = DateTime.Now;
-                    lock(store_batch)
+                    if (store_batch.Where(x => x.id == sto.id).Count() == 0)
                         store_batch.Add(sto);
                 }
-                var sPerH = TimeSpan.FromHours(1) * (st - smin) / Timer.Elapsed;
-                Console.WriteLine($"{sto!.id}.{sto.name} - {sto.city}, lpc={sto.last_product_count}, Speed={(int)sPerH:d4}_sph,FromStart:{Timer.Elapsed:hh\\:mm\\:ss}"); //:mm\\:ss\\
 
-                lock (el)
-                    emptyLinks = 0;
+                var sPerH = TimeSpan.FromHours(1) * stoDone / Timer.Elapsed;
+                Console.WriteLine($"{si}.{sto.name} - {sto.city}, lpc={sto.last_product_count}, Speed={(int)sPerH:d4}_sph,FromStart:{Timer.Elapsed:hh\\:mm\\:ss}"); //:mm\\:ss\\
             };
 
             var taskList = new List<Task>();
             Timer.Start();
-            for (var i = smin; emptyLinks < 250 && i < smax; i++)
+
+            Task SC_Task = null!;
+
+            Store curStore = null!;
+            Store? curStoreDB;
+
+            for (var i = 0; true;)
             {
+                lock (pagesCountersLock)
+                    if (SC_Task is null || (curPage < totPages && (SC_Task.IsCanceled || SC_Task.IsFaulted || SC_Task.IsCompleted)))
+                        SC_Task = Task.Factory.StartNew(() => collectStoreSourceList(), TaskCreationOptions.LongRunning);
+
                 while (taskList.Count() >= numberOfTasks)
                 {
                     taskList.RemoveAll(x => x.IsCompleted);
                     await Task.Delay(300);
                 }
+
                 lock (store_batch)
                     if (store_batch.Count > 10)
                         saveStores();
-                var stn = i;
-                taskList.Add(Task.Factory.StartNew(() => getFullStoreInfo(stn), TaskCreationOptions.LongRunning));
 
-
-                await Task.Delay(100);
-                var temp = """
-                Store? sto = SB_API.storeInfoGet(i);
-                if (sto is null)
+                bool theEnd = false;
+                lock (pagesCountersLock)
+                    if (i >= totStores)
+                        theEnd = true;
+                if (!theEnd)
                 {
-                    Console.WriteLine($"emptyLink:  {i}");
-                    emptyLinks++;
-                    continue;
-                }
-                /*
-                string rUrl = $"https://sbermarket.ru/api/stores/{i}";
-                var text = getWebText(rUrl);
-
-                if (text.Contains("error"))
-                {
-                    Console.WriteLine($"emptyLink:  {i}");
-                    emptyLinks++;
-                    continue;
-                }
-                try
-                {
-                    sto = JObject.Parse(text).SelectToken("$.store")?.ToObject<Store>();
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine(text); Console.WriteLine(e.Message);
-                }
-                */
-
-
-
-                //using (var db = new PISBContext())
-                {
-                    //var ob = db.Stores.FirstOrDefault(x => x.id == sto!.id);
-                    //var stores = db.Stores.ToList();
-                    // добавляем их в бд
-
-                    //var ob = stores.FirstOrDefault(x => x.id == sto!.id)!;
-
-                    //if (ob is not null) db.Stores.Remove(ob);
-                    if (sto is not null)
+                    bool cont = false;
+                    lock (store_source_lock)
                     {
-                        //var txt = getWebText($"https://sbermarket.ru/api/v2/products?q=&sid={sto.id}&page=1&per_page=1");
-                        //var meta = JObject.Parse(txt!).SelectToken("$.meta")?.ToObject<Meta_Products_SB_V2>();//JsonConvert.DeserializeObject<List<Category>>(txt);
-                        //(_, _, var meta) = SB_API.productSearch("", sto.id);
-
-                        /*var lpc = meta?.total_count ?? 0;
-                        if (lpc > 9999)
+                        if (store_source.Count > 0)
                         {
-                            //txt = getWebText($"https://sbermarket.ru/api/v2/categories?depth=1&reset_cache=true&sid={sto.id}");
-                            //var cats = JObject.Parse(txt!).SelectToken("$.categories")?.ToObject<List<Category_SB_V2>>();//JsonConvert.DeserializeObject<List<Category>>(txt);
-                            var cats = SB_API.categoryGet(sto.id);
-                            lpc = cats?.Where(x => x.id != 7107 && x.id != 57272).Sum(x => x.products_count) ?? 0;
+                            i++;
+                            while (true)
+                            {
+                                if (store_source.Count <= 0)
+                                {
+                                    cont = true;
+                                    break;
+                                }
+                                curStore = store_source[0];
+                                store_source.RemoveAll(x => x.id == curStore.id);
+                                lock (store_batch)
+                                    if (store_batch.Where(x => (x?.id ?? 0) == curStore.id).Count() <= 0)
+                                        break;
+                            }
                         }
-                        */
-                        var lpc = GetProductCount(sto.id);
-                        sto.last_product_count = lpc;//GetProductCount(sto.id);
-                        sto.lpc_dt = DateTime.Now;
-                        store_batch.Add(sto);
+                        else
+                            cont = true;
+                    }
+                    if (cont)
+                    {
+                        await Task.Delay(300);
+                        continue;
                     }
 
-                    //db.Stores.Add(sto!);
-                    if (i % 10 == 0)
-                        saveStores();
-
-                    Console.WriteLine($"{sto!.id}.{sto.name} - {sto.city}, lpc={sto.last_product_count}");
-                    //Console.Clear();
-                    //Console.WriteLine("Объекты успешно сохранены");
-
-                    // получаем объекты из бд и выводим на консоль
-                    //stores = db.Stores.OrderBy(x => x.id).ToList();
-                    //Console.WriteLine("Список объектов:");
-                    //foreach (var s in stores)
-                    //{
-                    //   Console.WriteLine($"{s.id}.{s.name} - {s.city}");
-                    //}
+                    curStoreDB = store_DB.FirstOrDefault(x => (x?.id ?? 0) == curStore.id);
+                    bool getFullInfo = true;
+                    if (curStoreDB is not null)
+                    {
+                        getFullInfo = false;
+                        curStore.phone = curStoreDB.phone;
+                        curStore.city_name = curStoreDB.city_name;
+                        curStore.city_slug = curStoreDB.city_slug;
+                        curStore.pharmacy_license = curStoreDB.pharmacy_license;
+                        curStore.last_product_count = curStoreDB.last_product_count;
+                        curStore.lpc_dt = curStoreDB.lpc_dt;
+                        var zid = curStore.operational_zone_id;
+                        if (!curStore.active || (zid != 0 && zid != 1 && zid != 17))
+                        {
+                            curStore.point0 = true;
+                            lock (store_batch)
+                                if (store_batch.Where(x => x.id == curStore.id).Count() == 0)
+                                    store_batch.Add(curStore);
+                            var sPerH = TimeSpan.FromHours(1) * i / Timer.Elapsed;
+                            Console.WriteLine($"Out of Moscow Region or not active:{curStore!.id}.{curStore.name} - {curStore.city}, lpc={curStore.last_product_count}, Speed={(int)sPerH:d4}_sph,FromStart:{Timer.Elapsed:hh\\:mm\\:ss}"); //:mm\\:ss\\
+                            continue;
+                        }
+                    }
+                    taskList.Add(Task.Factory.StartNew(() => getFullStoreInfo(curStore,i,getFullInfo), TaskCreationOptions.LongRunning));
                 }
-                emptyLinks = 0;
-                await Task.Delay(300); 
-                """;
+                else
+                    break;
+
+                await Task.Delay(100);
             }
             while (taskList.Count() > 0)
             {
@@ -472,12 +647,20 @@ namespace SB_Parser_API.MicroServices
         }
         public static void CollectRetailers() //async Task
         {
+            int per_page = 500;
 
-            var text = SB_API.Retailers();//response.Content.ReadAsStringAsync().Result;
-            var ret = JObject.Parse(text!).SelectToken("$.retailers")?.ToObject<List<Retailer>>();
+            var ret = new List<Retailer>();
+            for (int i = 1; ; i++)
+            {
+                var text = SB_API.Retailers(i, per_page);//response.Content.ReadAsStringAsync().Result;
+                var reti = JObject.Parse(text!).SelectToken("$.retailers")?.ToObject<List<Retailer>>();
+                if ((reti?.Count ?? 0) <= 0)
+                    break;
+                ret.AddRange(reti!);
+            }
 
 #pragma warning disable CA1416 // Проверка совместимости платформы
-            Console.BufferHeight = 10000;
+            Console.BufferHeight = 20000;
 #pragma warning restore CA1416 // Проверка совместимости платформы
 
             using var db = new PISBContext();
@@ -508,6 +691,66 @@ namespace SB_Parser_API.MicroServices
             foreach (var r in rets)
             {
                 Console.WriteLine($"{r.id}.{r.name} - {r.slug}");
+            }
+        }
+
+        public record ppuDt(long id, long sku, DateTime dt);
+        public static void CollectProductProperties(bool newProdutsOnly = false)
+        {
+            Init_AddOrUpdateProductProperties(newProdutsOnly);
+            var DbWriter = Task.Factory.StartNew(() => AddOrUpdateProductProperties(), TaskCreationOptions.LongRunning);
+
+            var skuProdPropToUpdate = sProducts!.Where(x => !newProdutsOnly || x.Value.dt_property_updated is null).Select(x => new 
+            ppuDt(x.Value.id, x.Value.sku ?? 0, x.Value.dt_property_updated ?? DateTime.Parse("Jan 1, 2023"))).OrderBy(x => x.dt).ToList();
+
+            Dictionary<AutoResetEvent, WebRequestOrder> requestPool = new();
+            bool endingFlag = false;
+
+            var addRequest = (int i) => 
+            {
+                var wro_tmp = productInfoSendRequest(skuProdPropToUpdate[i].id);
+                requestPool[wro_tmp.completed] = wro_tmp;
+            };
+
+            SP_Timer = new();
+            SP_Timer.Start();
+
+            for (var i = 0; i < skuProdPropToUpdate.Count;)
+            {
+                if(DbWriter.IsCanceled || DbWriter.IsFaulted || DbWriter.IsCompleted)
+                    DbWriter = Task.Factory.StartNew(() => AddOrUpdateProductProperties(), TaskCreationOptions.LongRunning);
+
+                if (!endingFlag && (requestPool.Count < productPropertyUpdateThreads))
+                {
+                    addRequest(i++);
+                    continue;
+                }
+                var wh_array = requestPool.Select(x => x.Key).ToArray();
+                int reqPointer = WaitHandle.WaitAny(wh_array);
+                var wro = requestPool[wh_array[reqPointer]];
+
+                requestPool.Remove(wh_array[reqPointer]);
+                if (!endingFlag)
+                    addRequest(i);
+                
+                var productInfo = productInfoFrom_WRO(wro);
+                if (productInfo is not null)
+                {
+                    var productPropertyList = productPropertyFromProductInfo(productInfo);
+
+                    lock (productPropertiesListToUpdateDB)
+                    {
+                        productPropertiesListToUpdateDB.AddRange(productPropertyList);
+                    }
+                }
+
+                if (requestPool.Count <= 0)
+                    break;
+
+                if (i + 1 >= skuProdPropToUpdate.Count)
+                    endingFlag = true;
+                else
+                    i++;
             }
         }
     }

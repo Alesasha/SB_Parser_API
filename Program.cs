@@ -25,9 +25,44 @@ using System.Threading.Tasks;
 using System.Collections;
 using static System.Web.HttpUtility;
 using System.Text.Encodings.Web;
+using System.Net;
+using Jurassic;
+using System.Web;
 
 namespace SB_Parser_API
 {
+    class Shutdown
+    {
+        /// <summary>
+        /// Windows restart
+        /// </summary>
+        public static void Restart()
+        {
+            StartShutDown("-f -r -t 5");
+        }
+        /// <summary>
+        /// Log off.
+        /// </summary>
+        public static void LogOff()
+        {
+            StartShutDown("-l");
+        }
+        /// <summary>
+        ///  Shutting Down Windows
+        /// </summary>
+        public static void Shut()
+        {
+            StartShutDown("-f -s -t 5");
+        }
+        private static void StartShutDown(string param)
+        {
+            ProcessStartInfo proc = new ProcessStartInfo();
+            proc.FileName = "cmd";
+            proc.WindowStyle = ProcessWindowStyle.Hidden;
+            proc.Arguments = "/C shutdown " + param;
+            Process.Start(proc);
+        }
+    }
     public class Program
     {
         //static int thisProcessId = 0;
@@ -146,38 +181,6 @@ namespace SB_Parser_API
             var ent = db.Entry(r);
             //db.Dispose();
 
-            //var en = et.Name;
-
-            //var reqGen = () => {
-            //    var request = new HttpRequestMessage(){
-            //        RequestUri = new Uri("http://hidemy.name/ru/proxy-list/?anon=234"), //https://sbermarket.ru/api/stores/21 http://hidemy.name/ru/proxy-list/?anon=234
-            //        Method = HttpMethod.Get,
-            //    };
-            //    request.Headers.UserAgent.Add(new System.Net.Http.Headers.ProductInfoHeaderValue("Mozilla", "5.0"));// (Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0")) ;  //(Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0")
-            //    request.Headers.UserAgent.Add(new System.Net.Http.Headers.ProductInfoHeaderValue("(Windows NT 10.0; rv:78.0)"));
-            //    return request;
-            //};
-
-            //request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9");
-            //request.Headers.Host = "hidemy.name";
-            //request.Headers.Add("authority", "hidemy.name");
-            //var ua = 
-
-            //request.Headers.Add("UserAgent" , "Mozilla/5.0 (Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0");
-            //request.Headers.Add("Referer", "http://hidemy.name/ru/proxy-list/?type=hs&anon=234");
-            //request.Headers.Referrer = new Uri($"http://hidemy.name/ru/proxy-list/?anon=234");
-            /*
-            request.Headers.Add("cache-control", "no-cache");
-            request.Headers.Add("pragma", "no-cache");
-            request.Headers.Add("sec-ch-ua", "\" Not;A Brand\";v=\"99\", \"Google Chrome\";v=\"91\", \"Chromium\";v=\"91\"");
-            request.Headers.Add("sec-ch-ua-mobile", "?0");
-            request.Headers.Add("upgrade-insecure-requests", "1");
-            request.Headers.Add("sec-fetch-site", "none");
-            request.Headers.Add("sec-fetch-mode", "navigate");
-            request.Headers.Add("sec-fetch-user", "?1");
-            request.Headers.Add("sec-fetch-dest", "document");
-            */
-
             //request.Headers.Add("cookie", "PAPVisitorId=fef4517aef9eff87737ba5ac529a786i; PAPVisitorId=fef4517aef9eff87737ba5ac529a786i; _ym_uid=16592862331034702442; _ym_d=1659286233; _ga=GA1.2.1985235452.1659286233; _gid=GA1.2.1581002767.1659286233; _ym_isad=2; _tt_enable_cookie=1; _ttp=fe6e411e-0057-4c2c-baca-dbb7e45e5695; _gat_UA-90263203-1=1; _dc_gtm_UA-90263203-1=1");
             Console.BackgroundColor = ConsoleColor.Black;
             //if (OperatingSystem.IsWindows())
@@ -203,31 +206,7 @@ namespace SB_Parser_API
           
             }
             */
-            /*
-            var isCorrect1 = CheckUserAgent("Mozilla/4.79 [en] (compatible; MSIE 7.0; Windows NT 5.0; .NET CLR 2.0.50727; InfoPath.2; .NET CLR 1.1.4322; .NET CLR 3.0.04506.30; .NET CLR 3.0.04506.648)");
-            var isCorrect2 = CheckUserAgent("Mozilla/4.0 (compatible; MSIE 7.0b; Windows NT 5.1; .NET CLR 1.1.4322; InfoPath.1; .NET CLR 2.0.50727)");
-            var PTDList = ProxyToDomainGet() ?? new List<Proxy_to_Domain>();
-            var i=0;
-            foreach (var ptd in PTDList)
-            {
-                i++;
-                if (CheckUserAgent(ptd.userAgent ?? ""))
-                {
-                    //Console.WriteLine($"[{i}]Good UA :{ptd.userAgent}");
-                    continue;
-                }
-                else
-                {
-                    Console.BackgroundColor = ConsoleColor.DarkRed;
-                    Console.WriteLine($"[{i}]Bad UA :{ptd.userAgent}");
-                    ptd.userAgent = RandomUA();
-                    ProxyToDomainAddOrUpdate(ptd);
-                    Console.BackgroundColor = ConsoleColor.DarkGreen;
-                    Console.WriteLine($"[{i}]New UA :{ptd.userAgent}");
-                }
-            }
-            Console.BackgroundColor = ConsoleColor.Black;
-            */
+
             reqQC = Task.Factory.StartNew(() => RequestQueueController(), TaskCreationOptions.LongRunning); //CheckDeadProxies(40);
             var rqcCheck = Task.Factory.StartNew(() =>
             {
@@ -237,48 +216,100 @@ namespace SB_Parser_API
 
             }, TaskCreationOptions.LongRunning);
 
-            /*
-            WebRequestOrder wro = new();
-            wro.url = "https://hidemy.name/ru/proxy-list/?anon=234&start=128";
-            wro.contentKeys.Add("class=country");
-            GetWebInfo(wro);
-            var txt = wro.textResponse();
-            */
-            //goto appGo;
-            /*            var cs = new Task[] 
-            { 
-                CollectShops("",1,3000), //HTTP://185.15.172.212:3128
-                CollectShops("", 3000, 6000), //SOCKS4://94.253.95.241:3629
-                CollectShops("", 6000, 9000), //HTTP://176.192.70.58:8014
-                CollectShops("", 9000, 12000), //HTTP://176.192.70.58:8017
-                CollectShops("", 12000, 15000), //HTTP://176.192.70.58:8022
-                CollectShops("", 15000, 18000),//HTTP://193.138.178.6:8282
-                CollectShops("", 18000, 21000),//SOCKS4://5.188.64.79:5678
-                CollectShops("", 21000, 24000), //HTTP://176.192.70.58:8029
-                CollectShops("", 24000, 27000), //HTTP://176.192.70.58:8006
-                CollectShops("", 27000, 30000),
-                CollectShops("", 30000, 33000),
-                CollectShops("", 33000, 36000),
-                CollectShops("", 36000, 39000),
-                CollectShops("", 39000, 44000),
-            };
-            
-            Task.WaitAll(cs);
-            */
             //var bc = Utils.BarCodeCheck("03010615");
             //CollectRetailers();
-            await CollectShops("", 1, 50000, 40);
-            //CollectProducts();
+            //await CollectShops(40);
+            //InitDBSerices();
             //SB_API.categoryGet(33388);
-            return;
-            //CollectProducts();
             //return;
+            //CollectProducts();
+            //CollectProductProperties(true); // true - new products only 
+            //GetCookieFromSelenium("", "");
+
+            /*
+            var engine = new Jurassic.ScriptEngine();
+            var jsres = (string)engine.Evaluate(FindSolutionScript("10", HttpUtility.UrlDecode("ciJKT%2BOt2guzJ8iIpd8qL2rnnnI%3D")));
+            Console.WriteLine(jsres);
+            */
+
+            var httpClient = new HttpClient();
+            string str;
+
+            var req = new HttpRequestMessage()
+            {
+                RequestUri = new Uri(@"https://sbermarket.ru/api/v2/products?q=&sid=9595&tid=&page=11&per_page=25&sort=popularity"),
+
+                //&oirutpspca=1694430204000_bfff2c2f10bbf371ad32723f4a375c4b_f6ec265495bb87f5e8311c2bb61c1014
+                //&oirutpspca=1694431124000_dbdaa16f6bd274bd59b54a5fae2473d1_f6ec265495bb87f5e8311c2bb61c1014
+
+                Method = HttpMethod.Get
+            };
+            req.Headers.Add("Cookie", "ngenix_jscv_cd881f1695eb=session_id_e0227498=73b33a402d5a3cc7a7777e63bd6b63b7&bot_profile_check=true&payload=JnmR6wHepNzhrlMdnsFpHxCtcl1v%2FSSDpTj9i8v4PLY%3D&visitor_id_af50ddc3=aa5725750c1ec9cdc1d30970af441ca2&challenge_complexity=10&cookie_expires=1695557060&cookie_signature=TzPlOuSgmgPZ4MmbZ%2Bn%2FHssL%2FCk%3D");
+
+            //req.Headers.Add("cookie", "spca=1694430204000_bfff2c2f10bbf371ad32723f4a375c4b_f6ec265495bb87f5e8311c2bb61c1014;");
+            //                           spca=1694431124000_dbdaa16f6bd274bd59b54a5fae2473d1_f6ec265495bb87f5e8311c2bb61c1014
+
+
+            req.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
+            req.Headers.Add("Accept-Encoding", "gzip, deflate, br");
+            req.Headers.Add("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7");
+            req.Headers.Add("Cache-Control", "max-age=0");
+            req.Headers.Add("Referer", "https://sbermarket.ru/api/v2/products?q=&sid=9595&tid=&page=11&per_page=25&sort=popularity");
+            //req.Headers.Add("Connection", "keep-alive");
+            //req.Headers.Add("cookie", "spca=1694431124000_dbdaa16f6bd274bd59b54a5fae2473d1_f6ec265495bb87f5e8311c2bb61c1014");
+
+            //req.Headers.Add("Host", "sbermarket.ru");
+
+            //req.Headers.Add("Pragma", "no-cache");
+
+            req.Headers.Add("Sec-Ch-Ua", (string?) null);
+            req.Headers.Add("Sec-Ch-Ua-Mobile", "?0");
+            req.Headers.Add("Sec-Ch-Ua-Platform", "\"\"");
+
+            req.Headers.Add("Sec-Fetch-Dest", "document");
+            req.Headers.Add("Sec-Fetch-Mode", "navigate");
+            req.Headers.Add("Sec-Fetch-Site", "same-origin");
+            //req.Headers.Add("Sec-Fetch-User", "?1");
+
+            req.Headers.Add("Upgrade-Insecure-Requests", "1");
+            req.Headers.Add("User-Agent", "Mozilla/7.0 (iPad; CPU OS 66_0 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/6.0 Mobile/10A5355d Safari/8536.25");
+            
+            //req.Headers.Add("sec-ch-ua", "\"Chromium\";v=\"106\", \"Atom\";v=\"26\", \"Not;A=Brand\";v=\"99\"");
+            //req.Headers.Add("sec-ch-ua-mobile", "?0");
+            //req.Headers.Add("sec-ch-ua-platform", "\"Windows\"");
+
+
+            var taskR = httpClient.SendAsync(req);
+            taskR.Wait();
+
+            var res = taskR.Result;
+            var txt = res?.Content.ReadAsStringAsync().Result ?? "";
+
+            using (var Tstream = httpClient.GetStringAsync(@"https://sbermarket.ru/api/v2/products?q=&sid=9595&tid=&page=1&per_page=23&sort=popularity"))
+            {
+                Tstream.Wait();
+                str = Tstream.Result;
+
+                var stream = Tstream.Result;
+                using (var fileStream = new FileStream(@"D:\psocks5.txt", FileMode.CreateNew))
+                {
+                    //stream.CopyTo(fileStream);
+                }
+            }
+
+            
+
+            return;
             //GetShops(55.901223, 37.741567, 10).Wait();
             //GetDBParam(DBParam.TotalPriceScanners);
+            //get_hidemy_name_list();
+
+            //var ce =    IPAddress.Loopback;
+            
             /*
             var chdpT = Task.Factory.StartNew(() => CheckDeadProxies(10), TaskCreationOptions.LongRunning); //CheckDeadProxies(40);
             var chpT = Task.Factory.StartNew(() => CheckProxies(40), TaskCreationOptions.LongRunning); //CheckProxies(40);
-
+            
             while (true)
             {
                 var nextStart = DateTime.Now.AddMinutes(120);
@@ -289,9 +320,10 @@ namespace SB_Parser_API
                 Task.Delay((int)(nextStart-DateTime.Now).TotalMilliseconds).Wait();
             }
             */
+
             //var txt = GetInfoSys(reqGen, $"http://176.192.70.58:8006"); //http://46.42.16.245:31565 //, "class=country" http://157.100.12.138:999
             //SB_Parser_API.MicroServices.ZC_API.testAutoMapper();
-            InitDBSerices();
+            //InitDBSerices();
             /*
             dynamic dbc = GetDBContext(typeof(Retailer));
             var lr = dbc.Retailers;
@@ -308,6 +340,9 @@ namespace SB_Parser_API
             //Thread.Sleep(3600000);
 appGo:
             var builder = WebApplication.CreateBuilder(args);
+            productNames = GetProductNamesForSearch() ?? new();
+            RegsStoresList = MosRegStoresGet() ?? new(); 
+            productBarcodes = GetProductBarcodesForSearch() ?? new();
 
 
 

@@ -72,6 +72,13 @@ namespace SB_Parser_API.MicroServices
             builder.AddJsonFile("Properties/launchSettings.json"); //appsettings.json
             return builder.Build().GetConnectionString(CS_Name)!.Replace(CS_Name, DB_Name).Replace($"gh{sk}",$"gh{sk+sk1}");
         }
+        public static int Get_DB_CommandTimeOut()
+        {
+            var builder = new ConfigurationBuilder();
+            builder.SetBasePath(Directory.GetCurrentDirectory());
+            builder.AddJsonFile("Properties/launchSettings.json"); //appsettings.json
+            return builder.Build().GetValue<int>("Get_DB_CommandTimeOut");
+        }
         public static double CalcDistance(double lat1, double lon1, double lat2, double lon2)
         {
             Func<double, double> Radians = (angle) => angle * Math.PI / 180.0;
@@ -284,7 +291,7 @@ namespace SB_Parser_API.MicroServices
         }
 
         //___________________________________________________________________
-        static string[] SFCWords = { };
+        static string[] SFCWords = Array.Empty<string>();
         static string SampleFC="";
 
         static public string PreProcessString(string st)
@@ -320,7 +327,6 @@ namespace SB_Parser_API.MicroServices
             SampleFC = SampleFCSafe;
             SFCWords = SFCWordsSafe;
             return (res);
-
         }
         static public void SetSample(string st)
         {

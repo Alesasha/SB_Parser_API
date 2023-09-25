@@ -25,6 +25,9 @@ using System.Reflection.PortableExecutable;
 using static System.Net.Mime.MediaTypeNames;
 using Azure;
 using AngleSharp.Dom;
+using Elastic.Clients.Elasticsearch.Core.Search;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+using System.Security.Cryptography.Xml;
 
 //using System.Web.Mvc;
 //using System.Data.Objects.ObjectQuery;
